@@ -1,0 +1,201 @@
+// Package icpkit queries the MIIT (工信部) ICP filing database at
+// beian.miit.gov.cn. It is the Go port of the "ICP_Query"/ymicp tool: it
+// speaks the undocumented icpproject_query API (auth -> slider captcha ->
+// checkImage -> queryByCondition), including the blacklist variants and the
+// App/MiniApp/快应用 detail fan-out.
+//
+// Like oastkit, MIIT is an external data source rather than a project target:
+// the kit talks to it through capkit.Fetcher, so the host still applies proxy,
+// timeout, rate limit and audit policy, but not project target scope.
+package icpkit
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/c1ayooo/capkit"
+)
+
+// Kit exposes the MIIT beian lookup as a capkit capability.
+type Kit struct {
+	client   *Client
+	evidence capkit.EvidenceSink
+}
+
+// New builds the kit from host ports. It never stores credentials: the MIIT
+// API needs none, only a transient token obtained per call.
+func New(deps capkit.Deps) *Kit {
+	return &Kit{
+		client:   NewClient(deps.Fetcher),
+		evidence: deps.Evidence,
+	}
+}
+
+// NewCapability adapts New to the capkit constructor signature.
+func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+	if deps.Fetcher == nil {
+		return nil, fmt.Errorf("icpkit: 需要 fetcher 端口")
+	}
+	return New(deps), nil
+}
+
+// Client 暴露底层协议客户端，便于宿主注入代理等传输配置。
+func (k *Kit) Client() *Client { return k.client }
+
+// Manifest declares the tool surface. MIIT is not a project target, so no tool
+// extracts targets; the lookup key is carried in the query result instead.
+func (k *Kit) Manifest() capkit.Manifest {
+	return capkit.Manifest{
+		Name: "icpkit", Version: "0.1.0", APIVersion: "v1",
+		Requires: []string{"fetcher"},
+		Tools: []capkit.ToolSpec{
+			mustTool(capkit.ToolSpec{
+				Name: "icp_query",
+				Description: "查询工信部 ICP 备案（beian.miit.gov.cn）：按单位名称/域名检索网站、App、小程序、快应用的备案信息，" +
+					"或查询黑名单（违法违规）备案。type 取值：web(网站，默认)|app(App)|mapp(小程序)|kapp(快应用)，" +
+					"黑名单前缀 b：bweb|bapp|bmapp|bkapp。app/mapp/kapp 会自动并发补齐每条记录的详情。" +
+					"同一查询空结果属正常（未备案/关键词无匹配）。",
+				InputSchema: json.RawMessage(`{
+  "type":"object",
+  "properties":{
+    "query":{"type":"string","description":"查询关键词：域名或单位名称（如 baidu.com / 北京百度网讯科技有限公司）"},
+    "type":{"type":"string","description":"web|app|mapp|kapp|bweb|bapp|bmapp|bkapp","enum":["web","app","mapp","kapp","bweb","bapp","bmapp","bkapp"]},
+    "page":{"type":"integer","description":"页码（默认 1，黑名单类型忽略）"},
+    "size":{"type":"integer","description":"每页条数（默认 10，黑名单类型忽略）"}
+  },
+  "required":["query"]
+}`),
+				Risk:           capkit.RiskLow,
+				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"},"records":{"type":"array","items":{"type":"object"}}}}`),
+				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+			}),
+			mustTool(capkit.ToolSpec{
+				Name:           "icp_types",
+				Description:    "列出 icp_query 支持的查询类型（普通备案 / 黑名单）及其含义。",
+				InputSchema:    json.RawMessage(`{"type":"object","properties":{}}`),
+				Risk:           capkit.RiskLow,
+				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"types":{"type":"array","items":{"type":"object"}}}}`),
+				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+			}),
+		},
+	}
+}
+
+// mustTool fills a default empty input schema and returns the spec.
+func mustTool(t capkit.ToolSpec) capkit.ToolSpec {
+	if len(t.InputSchema) == 0 {
+		t.InputSchema = json.RawMessage(`{"type":"object"}`)
+	}
+	return t
+}
+
+// Call routes one tool invocation.
+func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	switch call.Tool {
+	case "icp_query":
+		return k.query(ctx, call.Input)
+	case "icp_types":
+		return capkit.DataResult(TypeCatalog())
+	default:
+		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+	}
+}
+
+func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
+	var in struct {
+		Query string `json:"query"`
+		Type  string `json:"type"`
+		Page  int    `json:"page"`
+		Size  int    `json:"size"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil {
+		return capkit.FailResult(capkit.InvalidInput("请求参数不是合法 JSON: " + err.Error())), nil
+	}
+	name := strings.TrimSpace(in.Query)
+	if name == "" {
+		return capkit.FailResult(capkit.InvalidInput("query 不能为空")), nil
+	}
+	qtype := strings.ToLower(strings.TrimSpace(in.Type))
+	if qtype == "" {
+		qtype = TypeWeb
+	}
+	if !IsSupportedType(qtype) {
+		return capkit.FailResult(capkit.InvalidInput("不支持的查询类型: " + qtype)), nil
+	}
+
+	var (
+		raw string
+		err error
+	)
+	if IsBlackType(qtype) {
+		raw, err = k.client.QueryBlack(ctx, name, qtype)
+	} else {
+		page, size := in.Page, in.Size
+		if page <= 0 {
+			page = 1
+		}
+		if size <= 0 {
+			size = 10
+		}
+		raw, err = k.client.Query(ctx, name, qtype, page, size)
+	}
+	if err != nil {
+		return capkit.FailResult(err), nil
+	}
+
+	var parsed any
+	if uerr := json.Unmarshal([]byte(raw), &parsed); uerr != nil {
+		// 上游返回非 JSON（例如网关 HTML），原样透出便于排查。
+		return capkit.FailResult(capkit.Unavailable("上游响应不是合法 JSON")), nil
+	}
+
+	out := map[string]any{
+		"query":  name,
+		"type":   qtype,
+		"result": parsed,
+	}
+	if n, ok := listLen(parsed); ok {
+		out["count"] = n
+	}
+
+	res, rerr := capkit.DataResult(out)
+	if rerr != nil {
+		return capkit.FailResult(rerr), nil
+	}
+	if k.evidence != nil {
+		if blob, merr := json.Marshal(parsed); merr == nil {
+			id, eerr := k.evidence.Record(ctx, capkit.Evidence{
+				Kind:      "icp",
+				Title:     fmt.Sprintf("ICP 备案查询 %s (%s)", name, qtype),
+				Data:      blob,
+				CreatedAt: time.Now(),
+				Metadata:  map[string]string{"query": name, "type": qtype},
+			})
+			if eerr == nil && id != "" {
+				res.EvidenceIDs = []string{id}
+			}
+		}
+	}
+	return res, nil
+}
+
+// listLen reports the length of params.list when the upstream answered with a
+// success envelope carrying results.
+func listLen(parsed any) (int, bool) {
+	root, ok := parsed.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	params, ok := root["params"].(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	list, ok := params["list"].([]any)
+	if !ok {
+		return 0, false
+	}
+	return len(list), true
+}

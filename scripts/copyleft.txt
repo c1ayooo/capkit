@@ -1,0 +1,25 @@
+# Copyleft module roots that must NEVER be imported into this module.
+#
+# These tools are GPL/AGPL/SSPL licensed. Importing one would make capkit
+# (and every host that embeds it) undistributable. Their capability is instead
+# reached by invoking the tool as a subprocess through capkit.ProcessRunner
+# (see docs §6 边界: "识别与决策在库内，成品载荷在库外").
+#
+# One repository root per line, in the form host/org/repo. check-imports.sh
+# fails if any transitive import resolves to one of these roots.
+github.com/BishopFox/sliver
+github.com/bishopfox/sliver
+github.com/sqlmapproject/sqlmap
+github.com/PortSwigger/jwt_tool
+github.com/hahwul/jwt-hack
+github.com/s0md3v/Arjun
+github.com/AlessandroZ/LaZagne
+github.com/GhostPack/Rubeus
+github.com/gentilkiwi/mimikatz
+github.com/fortra/impacket
+github.com/SecureAuthCorp/impacket
+github.com/ropnop/kerbrute
+github.com/DarkCoderSc/PowerRemote
+github.com/rapid7/metasploit-framework
+github.com/wavestone-cdt/EDRSandblast
+github.com/zer1t0/certi

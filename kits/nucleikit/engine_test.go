@@ -1,0 +1,43 @@
+package nucleikit_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/harness/fakenuclei"
+	"github.com/c1ayooo/capkit/kits/nucleikit"
+)
+
+func TestEngineExecute(t *testing.T) {
+	runner := &fakenuclei.Runner{Stdout: []byte(
+		"{\"template-id\":\"t1\",\"info\":{\"severity\":\"high\"},\"matched-at\":\"http://127.0.0.1\"}\n",
+	)}
+	kit := nucleikit.New(capkit.Deps{
+		Processes: runner, Binaries: &fakenuclei.Binaries{Path: "/fake/nuclei"},
+	})
+	res, err := kit.Execute(context.Background(), []capkit.TemplateRef{{
+		ID: "t1", Kind: "nuclei", Artifact: []byte("id: t1\ninfo:\n  name: t1\n"),
+	}}, capkit.Target{Kind: capkit.TargetURL, URL: "http://127.0.0.1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("result = %+v", res)
+	}
+	var data struct {
+		HitCount int `json:"hit_count"`
+	}
+	if err := json.Unmarshal(res.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.HitCount != 1 {
+		t.Fatalf("hits = %d", data.HitCount)
+	}
+	call, ok := runner.LastCall()
+	if !ok || !strings.Contains(strings.Join(call.Args, " "), "-u http://127.0.0.1") {
+		t.Fatalf("call = %+v", call.Args)
+	}
+}

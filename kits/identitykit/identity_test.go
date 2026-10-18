@@ -1,0 +1,202 @@
+package identitykit_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/kits/identitykit"
+)
+
+func TestExtractCSRF(t *testing.T) {
+	html := `<html><body><form><input type="hidden" name="csrfmiddlewaretoken" value="tok123"></form></body></html>`
+	name, token := identitykit.ExtractCSRF(html)
+	if name != "csrfmiddlewaretoken" || token != "tok123" {
+		t.Fatalf("got %q/%q", name, token)
+	}
+	// value-before-name ordering
+	html2 := `<input value="abc" name="_csrf">`
+	_, tok2 := identitykit.ExtractCSRF(html2)
+	if tok2 != "abc" {
+		t.Fatalf("reverse-order token = %q", tok2)
+	}
+	// none present
+	if _, tok := identitykit.ExtractCSRF("<html>no token</html>"); tok != "" {
+		t.Fatalf("unexpected token %q", tok)
+	}
+	if got := identitykit.ExtractCSRFNamed(html, "csrfmiddlewaretoken"); got != "tok123" {
+		t.Fatalf("named = %q", got)
+	}
+	if got := identitykit.ExtractCSRFNamed(html, "missing"); got != "" {
+		t.Fatalf("named missing = %q", got)
+	}
+}
+
+func TestJarIdentityHeaders(t *testing.T) {
+	id, err := identitykit.NewJarIdentity("https://app.test/", http.Header{"X-Api-Key": []string{"k"}}, capkit.IdentityScope{Hosts: []string{"app.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id.AddCookie("session", "abc")
+	h, err := id.Headers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Get("X-Api-Key") != "k" {
+		t.Fatalf("extra header lost: %v", h)
+	}
+	if !strings.Contains(h.Get("Cookie"), "session=abc") {
+		t.Fatalf("cookie header = %q", h.Get("Cookie"))
+	}
+	if id.Scope().Hosts[0] != "app.test" {
+		t.Fatal("scope mismatch")
+	}
+	if err := id.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identitykit.NewJarIdentity("not a url", nil, capkit.IdentityScope{}); err == nil {
+		t.Fatal("expected invalid target error")
+	}
+}
+
+func TestTokenIdentityRefresh(t *testing.T) {
+	refreshCalls := 0
+	id := identitykit.NewTokenIdentity("Bearer", "old", capkit.TokenSnapshot{
+		AccessToken: "old",
+		ExpiresAt:   time.Now().Add(-time.Minute), // already expired
+	}, func(context.Context, string) (capkit.TokenSnapshot, error) {
+		refreshCalls++
+		return capkit.TokenSnapshot{AccessToken: "new", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}, capkit.IdentityScope{})
+
+	h, err := id.Headers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d", refreshCalls)
+	}
+	if h.Get("Authorization") != "Bearer new" {
+		t.Fatalf("auth = %q", h.Get("Authorization"))
+	}
+	// second call must not refresh again (fresh token)
+	if _, err := id.Headers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("unexpected extra refresh: %d", refreshCalls)
+	}
+	if id.Token() != "new" {
+		t.Fatalf("token = %q", id.Token())
+	}
+}
+
+func TestTokenIdentityRefreshError(t *testing.T) {
+	id := identitykit.NewTokenIdentity("Bearer", "t", capkit.TokenSnapshot{ExpiresAt: time.Now().Add(-time.Hour)},
+		func(context.Context, string) (capkit.TokenSnapshot, error) {
+			return capkit.TokenSnapshot{}, context.DeadlineExceeded
+		},
+		capkit.IdentityScope{})
+	if _, err := id.Headers(context.Background()); err == nil {
+		t.Fatal("expected refresh error")
+	}
+	// A static token (no refresh fn) never errors.
+	static := identitykit.NewTokenIdentity("Bearer", "s", capkit.TokenSnapshot{}, nil, capkit.IdentityScope{})
+	if _, err := static.Headers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTokenSnapshotNeedsRefresh(t *testing.T) {
+	now := time.Now()
+	if (capkit.TokenSnapshot{}).NeedsRefresh(now, time.Minute) {
+		t.Fatal("zero expiry must not trigger refresh")
+	}
+	if !(capkit.TokenSnapshot{ExpiresAt: now.Add(10 * time.Second)}).NeedsRefresh(now, time.Minute) {
+		t.Fatal("token expiring within skew must refresh")
+	}
+	if (capkit.TokenSnapshot{ExpiresAt: now.Add(time.Hour)}).NeedsRefresh(now, time.Minute) {
+		t.Fatal("fresh token must not refresh")
+	}
+}
+
+func TestFormFlowLogin(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			http.SetCookie(w, &http.Cookie{Name: "pre", Value: "1"})
+			_, _ = w.Write([]byte(`<input name="csrf_token" value="tok">`))
+			return
+		}
+		buf := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(buf)
+		gotBody = string(buf)
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "sess1"})
+		_, _ = w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	doer := httpDoer{}
+	flow := &identitykit.FormFlow{
+		LoginURL: srv.URL + "/login", CSRFRequired: true,
+		HTTP: doer, Target: srv.URL,
+		SuccessCheck: func(status int, body string) bool { return strings.Contains(body, "welcome") },
+	}
+	id, err := flow.Login(context.Background(), capkit.Credentials{Username: "admin", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Kind() != "form" {
+		t.Fatalf("kind = %q", flow.Kind())
+	}
+	if !strings.Contains(gotBody, "csrf_token=tok") {
+		t.Fatalf("csrf token not submitted: %q", gotBody)
+	}
+	h, _ := id.Headers(context.Background())
+	if !strings.Contains(h.Get("Cookie"), "session=sess1") {
+		t.Fatalf("login cookie not captured: %q", h.Get("Cookie"))
+	}
+}
+
+func TestFormFlowMissingHTTPDoer(t *testing.T) {
+	flow := &identitykit.FormFlow{LoginURL: "http://x/login"}
+	if _, err := flow.Login(context.Background(), capkit.Credentials{}); err == nil {
+		t.Fatal("expected HTTPDoer requirement error")
+	}
+}
+
+// httpDoer adapts net/http to capkit.HTTPDoer for tests.
+type httpDoer struct{}
+
+func (httpDoer) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+	method := req.Method
+	if method == "" {
+		method = "GET"
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, strings.NewReader(string(req.Body)))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body := make([]byte, 0)
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		body = append(body, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	return &capkit.Response{Status: resp.StatusCode, Headers: resp.Header, Body: body}, nil
+}

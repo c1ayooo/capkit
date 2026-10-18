@@ -1,0 +1,19 @@
+# 构建产物
+/dist/
+/bin/
+*.test
+*.exe
+*.dll
+*.so
+
+# 覆盖率
+coverage.out
+coverage.txt
+coverage.html
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
