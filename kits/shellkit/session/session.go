@@ -26,6 +26,12 @@ type ExecResult struct {
 	Output     string
 	HTTPStatus int
 	TrafficID  string
+	// Encoding declares how Output carries a file body on File reads: "base64"
+	// when Output is base64 of the file, anything else (including "") when it is
+	// the file itself. The adapter does not guess, because a plain-text body such
+	// as "abcdefgh" is also a legal base64 string and sniffing it would silently
+	// return 6 bytes of garbage instead of the file.
+	Encoding string
 }
 
 type FileOp struct {

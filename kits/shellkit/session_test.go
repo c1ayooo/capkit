@@ -29,7 +29,9 @@ func (fakeExecutor) Exec(_ context.Context, _ shellsession.Session, cmd string) 
 func (fakeExecutor) File(_ context.Context, _ shellsession.Session, op shellsession.FileOp) (*shellsession.ExecResult, error) {
 	switch op.Action {
 	case "read":
-		return &shellsession.ExecResult{Output: "ZmlsZS1jb250ZW50", HTTPStatus: 200}, nil // base64 "file-content"
+		// base64("file-content"), declared: the adapter decodes on the host's
+		// word rather than guessing (a plain "abcdefgh" is also valid base64).
+		return &shellsession.ExecResult{Output: "ZmlsZS1jb250ZW50", HTTPStatus: 200, Encoding: "base64"}, nil
 	default:
 		return &shellsession.ExecResult{Output: "ok", HTTPStatus: 200}, nil
 	}

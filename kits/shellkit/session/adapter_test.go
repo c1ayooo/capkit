@@ -23,7 +23,8 @@ func (f *fakeExec) Exec(_ context.Context, _ session.Session, cmd string) (*sess
 func (f *fakeExec) File(_ context.Context, _ session.Session, op session.FileOp) (*session.ExecResult, error) {
 	f.lastF = op
 	if op.Action == "read" {
-		return &session.ExecResult{Output: "aGVsbG8=", HTTPStatus: 200}, nil // "hello"
+		// Declaring the encoding is what makes the decode unambiguous.
+		return &session.ExecResult{Output: "aGVsbG8=", HTTPStatus: 200, Encoding: "base64"}, nil // "hello"
 	}
 	return &session.ExecResult{Output: "ok", HTTPStatus: 200}, nil
 }
@@ -116,5 +117,71 @@ func TestAdapterNilExecutor(t *testing.T) {
 	}
 	if _, err := s.Download(context.Background(), "/y"); err == nil {
 		t.Fatal("expected executor-missing error")
+	}
+}
+
+// fileExec returns one fixed File result, so the encoding contract can be
+// pinned without a protocol implementation.
+type fileExec struct{ res session.ExecResult }
+
+func (f fileExec) Exec(context.Context, session.Session, string) (*session.ExecResult, error) {
+	return &session.ExecResult{Output: "ok"}, nil
+}
+
+func (f fileExec) File(context.Context, session.Session, session.FileOp) (*session.ExecResult, error) {
+	r := f.res
+	return &r, nil
+}
+
+func downloadBytes(t *testing.T, res session.ExecResult) ([]byte, error) {
+	t.Helper()
+	s := &session.CapabilitySession{
+		Shell:    session.Session{ID: 7, URL: "http://h/s.php"},
+		Executor: fileExec{res: res},
+	}
+	rc, err := s.Download(context.Background(), "/tmp/f")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+	return io.ReadAll(rc)
+}
+
+// TestAdapterDownloadDoesNotGuessEncoding pins the fix for a silent-corruption
+// bug: "payloadbytes" consists of 12 base64-alphabet characters, so the old
+// sniffing heuristic decoded it to 9 garbage bytes. An undeclared body is the
+// file itself.
+func TestAdapterDownloadDoesNotGuessEncoding(t *testing.T) {
+	got, err := downloadBytes(t, session.ExecResult{Output: "payloadbytes", HTTPStatus: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "payloadbytes" {
+		t.Fatalf("undeclared body was altered: %q", got)
+	}
+	// The same holds for shorter base64-shaped words: eight alphabet characters
+	// are a legal base64 string too.
+	got, err = downloadBytes(t, session.ExecResult{Output: "abcdefgh", HTTPStatus: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "abcdefgh" {
+		t.Fatalf("eight-char plain text was altered: %q", got)
+	}
+}
+
+func TestAdapterDownloadHonorsDeclaredBase64(t *testing.T) {
+	got, err := downloadBytes(t, session.ExecResult{Output: "aGVsbG8=", HTTPStatus: 200, Encoding: "base64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("declared base64 was not decoded: %q", got)
+	}
+}
+
+func TestAdapterDownloadRejectsInvalidDeclaredBase64(t *testing.T) {
+	if _, err := downloadBytes(t, session.ExecResult{Output: "not base64!", Encoding: "base64"}); err == nil {
+		t.Fatal("a declared base64 body that does not decode must be an error, not silent garbage")
 	}
 }

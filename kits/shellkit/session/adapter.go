@@ -104,29 +104,16 @@ func (c *CapabilitySession) Download(ctx context.Context, remote string) (io.Rea
 		return nil, err
 	}
 	data := []byte(res.Output)
-	// WebShell protocols often base64 the file content; decode when it looks
-	// like base64 so callers get raw bytes.
-	if decoded, ok := tryBase64(res.Output); ok {
+	// Some WebShell protocols base64 file content; the executor declares it with
+	// ExecResult.Encoding. Guessing is not an option: a plain-text body such as
+	// "abcdefgh" is also a legal base64 string, so a sniff would silently return
+	// 6 bytes of garbage instead of the file.
+	if strings.EqualFold(res.Encoding, "base64") {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(res.Output))
+		if err != nil {
+			return nil, fmt.Errorf("对端声明 base64 但内容解码失败：%w", err)
+		}
 		data = decoded
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
-}
-
-func tryBase64(s string) ([]byte, bool) {
-	clean := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '+', r == '/', r == '=':
-			return r
-		default:
-			return -1
-		}
-	}, strings.TrimSpace(s))
-	if len(clean) < 8 || len(clean)%4 != 0 {
-		return nil, false
-	}
-	decoded, err := base64.StdEncoding.DecodeString(clean)
-	if err != nil {
-		return nil, false
-	}
-	return decoded, true
 }
