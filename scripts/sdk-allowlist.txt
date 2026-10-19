@@ -1,0 +1,42 @@
+# Third-party SDK module roots permitted inside kits.
+#
+# This is the whitelist behind red line 4 ("新依赖必须写进 DEPENDENCIES.md 并更新
+# check-imports.sh 白名单"). One entry per line: `<kit> <module-root>`, where the
+# root is the Go module path (host/org/repo, plus a `/vN` suffix when the module
+# has one). Subpackages of a root are covered by it.
+#
+# Two rules are enforced by scripts/check-imports.sh:
+#   1. A kit may import a module only if the module's root is listed for that
+#      same kit. A cloud SDK reached from any other kit would break the
+#      "kits stay host-independent and portable" boundary, and would drag a
+#      vendor's whole dependency tree into a kit that has nothing to do with it.
+#   2. No third-party module outside this file may be imported by a kit, and the
+#      capkit root package may import none at all (standard library only).
+#
+# So adding a dependency means adding a line here *and* a row in
+# DEPENDENCIES.md, in the same change.
+#
+# --- cloud provider SDKs ---
+kits/cloudkit github.com/aws/aws-sdk-go-v2
+kits/cloudkit github.com/aws/smithy-go
+kits/cloudkit github.com/alibabacloud-go/darabonba-openapi/v2
+kits/cloudkit github.com/alibabacloud-go/tea
+kits/cloudkit github.com/alibabacloud-go/ecs-20140526/v4
+kits/cloudkit github.com/alibabacloud-go/ram-20150501/v2
+kits/cloudkit github.com/alibabacloud-go/rds-20140815/v6
+kits/cloudkit github.com/alibabacloud-go/sts-20150401/v2
+kits/cloudkit github.com/aliyun/alibabacloud-oss-go-sdk-v2
+kits/cloudkit github.com/tencentcloud/tencentcloud-sdk-go
+kits/cloudkit github.com/tencentyun/cos-go-sdk-v5
+kits/cloudkit github.com/huaweicloud/huaweicloud-sdk-go-v3
+# --- template / rule parsing ---
+kits/templatekit gopkg.in/yaml.v3
+kits/fingerprintkit gopkg.in/yaml.v3
+kits/playbookkit gopkg.in/yaml.v3
+# --- enterprise data sources + ICP filing ---
+kits/enterprisekit github.com/tidwall/gjson
+kits/icpkit github.com/tidwall/gjson
+# --- ssh / database credential probes ---
+kits/credkit golang.org/x/crypto
+kits/credkit github.com/jackc/pgx/v5
+kits/sessionkit golang.org/x/crypto

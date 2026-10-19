@@ -4,32 +4,31 @@
 > 长线里程碑定义见 `docs/ROADMAP.md`，本文件只记录实际进度。
 > 只写事实和状态，不写计划感想。状态只有三种：DONE / DOING / TODO。
 
-当前里程碑：M1 收尾与上架（T1–T3 云控制台由并行会话负责；T4–T8 本会话已完成）
+当前里程碑：M1 收尾与上架（云资产接线已完成；唯一未达项是真实凭据验证）
 
 ## 并行会话归属（重要）
 
-另一个会话正在改 `kits/cloudkit/**`、`go.mod`、`go.sum`、`docs/STATUS.md`。
+另一个会话曾负责 `kits/cloudkit/**`、`go.mod`、`go.sum`、`docs/STATUS.md`。
+本轮收尾会话按任务书接管 T1/T3/T4，**已同步修改** `kits/cloudkit/**`、`go.mod`、
+`go.sum`；`docs/STATUS.md` 仍归并行会话，本会话未跟踪、未提交。
 
-本会话的边界：
+**当前 verify 状态（2026-10-19 11:43 实测）**：
+`bash scripts/verify.sh` **PASSED** — build / vet / test / contract envelope /
+import boundaries 全绿，**契约覆盖 81 工具**（76 + cloudkit 5），达 ROADMAP M1 下限。
 
-- **不要改** `kits/cloudkit/**`、`go.mod`、`go.sum`、`docs/STATUS.md`
-- M1 的 T1（注册 cloudkit）、T2（阿里云）、T3（腾讯云华为云）视为外部处理，跳过
-- 开工时如果 `all/register.go` 已有 `RegisterCloud` 就直接用；没有就跳过 T1，不要自己加
-- 需要 `go mod tidy` 时先确认 cloudkit 会话已收尾提交，否则等它
+**M1 退出还差一项（2026-10-19 11:48 复核）**：
 
-本会话（T4–T8）已完成的收尾项见第三节。
+1. 四家云 `cloud_ak_verify` / `cloud_asset_list` 需**真实凭据**各跑通一次。
+   本机 `CAPKIT_CLOUD_*` 环境变量数量为 **0** → **未验证 — 缺真实凭据**
+   （对应 STOP 条件 1）。四家云的离线假件测试全 PASS，但不等价于真实调用。
+   `huawei.go` 的 `cloud_storage_list` / `cloud_run_command` 诚实返回 `unsupported`
+   （OBS 是独立 SDK、ECS v2 无云助手 API），不计入「未验证」。
 
-**当前 verify 状态（2026-10-19 09:3x）**：`bash scripts/verify.sh` **红**，唯一失败点是
-`kits/cloudkit` 的两个在写测试（`TestAliyunListStorageObjectsOffline`、
-`TestAliyunRunCommandOffline`），属并行会话进行中的实现，本会话不触碰。
-除此之外 build / vet / test / contract envelope / import boundaries 全绿，契约覆盖 76 工具。
-
-**M1 退出还差两项（均不在本会话控制内）**：
-
-1. `all/register.go` 缺 `RegisterCloud`，cloudkit 的 5 个工具未注册 → 契约覆盖 76 < 81；
-   `verify.sh` 因 cloudkit 两个在写测试而红。属并行会话 T1–T3。
-2. 四家云 `cloud_ak_verify` / `cloud_asset_list` 需**真实凭据**各跑通一次，
-   本机不存在 `CAPKIT_CLOUD_*` 环境变量 → 无法执行（对应 STOP 条件 1）。
+**版本库脏区（2026-10-19 12:00 复核）**：`kits/cloudkit/**`、`all/register.go`、
+`contract_ci_test.go`、`go.mod`、`go.sum`、`DEPENDENCIES.md`、`scripts/check-imports.sh`、
+`scripts/sdk-allowlist.txt`、`STATE.md` 为本次收尾的改动集合；`docs/STATUS.md`
+仍由并行会话持有，本会话未跟踪、未提交。`scripts/` 两项由并行会话写入，
+本会话核实其正确性（曾一度因白名单匹配逻辑两次报红，12:00 已修复并通过）。
 
 更新时间：2026-10-19
 
@@ -68,13 +67,26 @@ bash scripts/verify.sh
 - [x] latkit 8 个工具（psexec / wmiexec / smbexec / winrm / pass-the-hash / kerberoast / asrep / dcsync）
 - [x] persistkit（enum / plan / apply）、cleanupkit（preview / apply）
 - [x] cloudkit AWS 完整实现（ec2 / iam / rds / s3 / ssm，573 行，真调 SDK）
+- [x] cloudkit 阿里云 / 腾讯云完整实现（真调 SDK，离线假件测试全 PASS）
+- [x] cloudkit 华为云接线（`huawei.go` 740+ 行，真调 `huaweicloud-sdk-go-v3`）：
+  `cloud_ak_verify`（STS `GetCallerIdentity`）、`cloud_asset_list`（ECS `ListServersDetails`
+  + RDS `ListInstances`，project_id 交由 SDK 经 `region.NewRegion` 解析）、
+  `cloud_iam_list`（IAM v3 `KeystoneListUsers` / `KeystoneListPermissions` /
+  `ListPermanentAccessKeys`，外加有界的组权限管理探测）。
+  `cloud_storage_list` / `cloud_run_command` 诚实返回 `unsupported` 并写明原因
+  （OBS 走独立的 `huaweicloud-sdk-go-obs`，未引入；ECS v2 无云助手 API），不伪造能力。
+  签名、分页、重试全部交 SDK。
+- [x] cloudkit 注册：`all.RegisterCloud` 已加并接入 `RegisterFull`；
+  `contract_ci_test.go` 的 `kitRegistration` 增加 `cloudkit` 项 →
+  **契约覆盖 76 → 81 工具**。
+- [x] 依赖登记：`DEPENDENCIES.md` 补齐 22 条云 SDK（名称 / 版本 / 许可证 / 用途，
+  全 Apache-2.0，腾讯 COS 为 MIT，无一在 copyleft 名单）。
 - [x] `docs/` 四份文档：实现方案、工具调用协议、宿主接线指南、前端展示设计方案
 
 ### DOING
 
-- [ ] **cloudkit（并行会话，进行中）**：`kits/cloudkit/aliyun.go` 在写，
-  `TestAliyunListStorageObjectsOffline` / `TestAliyunRunCommandOffline` 仍失败。
-  本会话不触碰。等它收尾提交后 `verify.sh` 才能整体转绿。
+- [ ] **四家云真实凭据验证（阻塞中）**：本机 `CAPKIT_CLOUD_*` 数量为 0 →
+  **未验证 — 缺真实凭据**。这是 M1 唯一未达标项，参见 STOP 条件 1。
 
 ### DONE（本会话 T4–T8 收尾）
 
@@ -95,11 +107,19 @@ bash scripts/verify.sh
   并加 `scripts/repair-covdata.sh`（幂等、非致命），在 `verify.sh` 里自动自愈。
   **验证**：多包 `go test -cover ./...` 退出码 0、零 `covdata` 报错、所有 kit 覆盖率非零。
 
-### TODO（按优先级，含并行会话项）
+### TODO（按优先级）
 
-- [ ] **注册 cloudkit + 三家云接线**（并行会话）：`all/register.go` 加 `RegisterCloud`，
-  接 `RegisterFull`；阿里/腾讯/华为三云照 `aws.go` 骨架补全。完成后 `verify.sh` 转绿、契约覆盖达 81。
+- [ ] **四家云真实凭据验证**（M1 唯一未达标项）：在具备真实 AK/SK 的机器上，对
+  AWS / 阿里云 / 腾讯云 / 华为云各跑通一次 `cloud_ak_verify` 与 `cloud_asset_list`。
+- [ ] **`docs/STATUS.md` 补 cloudkit 段**：该文件当前完全没有 cloudkit 条目，
+  归并行会话修改，本会话未跟踪、未提交。
 - [ ] v2 扩展七项（云控制台接管、容器逃逸执行、跳板机深度采集、隧道自动搭建、反序列化验证、AD 域利用、C2 接入），详见文档第十章
+
+> 红线 4 的白名单机制（2026-10-19 复核）：`scripts/check-imports.sh` 原有两关
+> （kit/host 边界、copyleft 名单）之外，已新增 `scripts/sdk-allowlist.txt` 作为第三方
+> 模块白名单——格式 `<kit> <module-root>`，按 kit 分别授权，capkit 根包仍限定标准库。
+> 四家云 SDK 已在该白名单登记（`kits/cloudkit github.com/aws/aws-sdk-go-v2` 等），
+> 并在 `DEPENDENCIES.md` 有对应条目，红线 4 两个落点均已满足。
 
 ## 四、红线
 

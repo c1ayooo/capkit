@@ -9,6 +9,7 @@ import (
 	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/kits/avkit"
 	"github.com/c1ayooo/capkit/kits/cleanupkit"
+	"github.com/c1ayooo/capkit/kits/cloudkit"
 	"github.com/c1ayooo/capkit/kits/containerkit"
 	"github.com/c1ayooo/capkit/kits/credkit"
 	"github.com/c1ayooo/capkit/kits/enterprisekit"
@@ -180,6 +181,21 @@ func RegisterLateral(reg *capkit.Registry) error {
 	return reg.Add(capkit.Spec{Manifest: latkit.Manifest(), New: latkit.NewCapability})
 }
 
+// RegisterCloud registers the five cloud-asset tools (cloud_ak_verify,
+// cloud_asset_list, cloud_iam_list, cloud_storage_list, cloud_run_command). The
+// runtime must supply an HTTPDoer; credentials arrive per call and are never
+// retained, and every vendor request stays behind the host's scope/rate/audit
+// gates. cloud_run_command is high risk and therefore approval-gated.
+//
+// Provider coverage is honest rather than uniform: AWS, Alibaba and Tencent
+// implement all five; Huawei implements verify, asset listing and IAM listing,
+// and reports cloud_storage_list / cloud_run_command as unsupported because the
+// OBS SDK and the ECS cloud-assistant API are outside huaweicloud-sdk-go-v3.
+func RegisterCloud(reg *capkit.Registry) error {
+	kit := cloudkit.New(capkit.Deps{})
+	return reg.Add(capkit.Spec{Manifest: kit.Manifest(), New: cloudkit.NewCapability})
+}
+
 // RegisterEnterprise registers the enterprise-data-source tools. The resolver
 // is host-supplied (it resolves cookies/keys from the host's session vault), so
 // this helper takes it explicitly rather than reading it from capkit.Deps.
@@ -203,11 +219,11 @@ func Register(reg *capkit.Registry) error {
 
 // RegisterFull additionally registers verifykit, githubkit, oastkit,
 // spacemapkit, icpkit, exploitkit, shellkit's session tools, the post-
-// exploitation kits (privesc/internalnet/persist/cleanup/av), containerkit and
-// latkit. Only use it when the host supplies fingerprints/templates/
-// template_engines/fetcher/settings/a SessionManager/a ProcessRunner and has an
-// approval gate configured (the session, lateral-movement and exploit tools are
-// high risk).
+// exploitation kits (privesc/internalnet/persist/cleanup/av), containerkit,
+// latkit and cloudkit. Only use it when the host supplies fingerprints/templates/
+// template_engines/fetcher/settings/a SessionManager/a ProcessRunner/an HTTPDoer
+// and has an approval gate configured (the session, lateral-movement, exploit
+// and cloud-assistant tools are high risk).
 //
 // reconkit and enterprisekit are deliberately NOT here: both need host-injected
 // collaborators that capkit.Deps cannot carry (an AssetSink/provider set for
@@ -257,6 +273,9 @@ func RegisterFull(reg *capkit.Registry) error {
 		return err
 	}
 	if err := RegisterPostExploitation(reg); err != nil {
+		return err
+	}
+	if err := RegisterCloud(reg); err != nil {
 		return err
 	}
 	return RegisterCred(reg)

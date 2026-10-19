@@ -270,6 +270,7 @@ var kitRegistration = map[string]func(*capkit.Registry) error{
 	"spacemapkit":    all.RegisterSpacemap,
 	"icpkit":         all.RegisterICP,
 	"credkit":        all.RegisterCred,
+	"cloudkit":       all.RegisterCloud,
 	"fingerprintkit": all.RegisterFingerprint,
 	"templatekit":    all.RegisterTemplate,
 	"playbookkit":    all.RegisterPlaybook,
