@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/sealer"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/runtime"
@@ -21,48 +21,48 @@ import (
 // the outcome.
 type stubFetcher struct{}
 
-func (stubFetcher) Fetch(context.Context, capkit.Request) (*capkit.Response, error) {
-	return &capkit.Response{Status: 200}, nil
+func (stubFetcher) Fetch(context.Context, core.Request) (*core.Response, error) {
+	return &core.Response{Status: 200}, nil
 }
 
 type stubRunner struct{}
 
-func (stubRunner) Run(context.Context, capkit.ProcessSpec) (*capkit.ProcessResult, error) {
-	return &capkit.ProcessResult{ExitCode: 0}, nil
+func (stubRunner) Run(context.Context, core.ProcessSpec) (*core.ProcessResult, error) {
+	return &core.ProcessResult{ExitCode: 0}, nil
 }
 
 type stubBinaries struct{}
 
-func (stubBinaries) Ensure(context.Context, string, string) (string, capkit.BinaryStatus, error) {
-	return "", capkit.BinaryStatus{}, nil
+func (stubBinaries) Ensure(context.Context, string, string) (string, core.BinaryStatus, error) {
+	return "", core.BinaryStatus{}, nil
 }
-func (stubBinaries) Update(context.Context, string, string) (capkit.BinaryStatus, error) {
-	return capkit.BinaryStatus{}, nil
+func (stubBinaries) Update(context.Context, string, string) (core.BinaryStatus, error) {
+	return core.BinaryStatus{}, nil
 }
-func (stubBinaries) Status(context.Context, string) (capkit.BinaryStatus, error) {
-	return capkit.BinaryStatus{}, nil
+func (stubBinaries) Status(context.Context, string) (core.BinaryStatus, error) {
+	return core.BinaryStatus{}, nil
 }
 
 type stubFingerprints struct{}
 
-func (stubFingerprints) Fingerprint(context.Context, capkit.Target) ([]capkit.Fingerprint, error) {
+func (stubFingerprints) Fingerprint(context.Context, core.Target) ([]core.Fingerprint, error) {
 	return nil, nil
 }
 
 type stubCatalog struct{}
 
-func (stubCatalog) Search(context.Context, capkit.TemplateQuery) ([]capkit.TemplateRef, error) {
+func (stubCatalog) Search(context.Context, core.TemplateQuery) ([]core.TemplateRef, error) {
 	return nil, nil
 }
-func (stubCatalog) Get(context.Context, string) (capkit.TemplateRef, bool, error) {
-	return capkit.TemplateRef{}, false, nil
+func (stubCatalog) Get(context.Context, string) (core.TemplateRef, bool, error) {
+	return core.TemplateRef{}, false, nil
 }
 
 type stubEngine struct{}
 
 func (stubEngine) Kind() string { return "http" }
-func (stubEngine) Execute(context.Context, []capkit.TemplateRef, capkit.Target, map[string]any) (capkit.Result, error) {
-	return capkit.NewResult(capkit.StatusSuccess, "stub"), nil
+func (stubEngine) Execute(context.Context, []core.TemplateRef, core.Target, map[string]any) (core.Result, error) {
+	return core.NewResult(core.StatusSuccess, "stub"), nil
 }
 
 // TestEveryRegisteredToolReturnsAValidEnvelope is the §8.4/§8.5 gate applied to
@@ -71,7 +71,7 @@ func (stubEngine) Execute(context.Context, []capkit.TemplateRef, capkit.Target, 
 // returns — success, blocked, unavailable, need_human, failed — must satisfy
 // the envelope contract.
 func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterFull(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 		HTTP: httpx.New(scope, lim, audit), Fetcher: stubFetcher{},
 		Settings: settings.New(nil), Sealer: seal, Processes: stubRunner{},
 		Binaries: stubBinaries{}, Fingerprints: stubFingerprints{},
-		Templates: stubCatalog{}, TemplateEngines: map[string]capkit.TemplateEngine{"http": stubEngine{}},
+		Templates: stubCatalog{}, TemplateEngines: map[string]core.TemplateEngine{"http": stubEngine{}},
 		Sessions: mgr,
 	}, reg)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 	// A closed session id is enough to reach every session tool's not-found
 	// path; the point is the envelope, not the outcome.
 	in := json.RawMessage(`{"session_id":"nonexistent"}`)
-	cc := capkit.CallContext{ProjectID: 1, Actor: "envelope-gate"}
+	cc := core.CallContext{ProjectID: 1, Actor: "envelope-gate"}
 	for _, tool := range rt.Tools() {
 		res, err := rt.Call(context.Background(), tool.Name, in, cc)
 		if err != nil {
@@ -117,8 +117,8 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 		if res.Summary == "" {
 			t.Errorf("%s: empty summary", tool.Name)
 		}
-		if n := len([]rune(res.Summary)); n > capkit.MaxSummaryRunes {
-			t.Errorf("%s: summary = %d runes > %d", tool.Name, n, capkit.MaxSummaryRunes)
+		if n := len([]rune(res.Summary)); n > core.MaxSummaryRunes {
+			t.Errorf("%s: summary = %d runes > %d", tool.Name, n, core.MaxSummaryRunes)
 		}
 		// §8.4: Meta.Tool non-empty, DurationMS > 0.
 		if res.Meta.Tool == "" {
@@ -133,16 +133,16 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 			if !codeKnown(res.Error.Code) {
 				t.Errorf("%s: error code %q outside the fixed enum", tool.Name, res.Error.Code)
 			}
-			if res.Error.Code == capkit.CodeScopeDenied && res.Error.Retryable {
+			if res.Error.Code == core.CodeScopeDenied && res.Error.Retryable {
 				t.Errorf("%s: scope_denied must not be retryable", tool.Name)
 			}
 		}
 		// §8.5: Data respects the ceiling.
-		if len(res.Data) > capkit.MaxDataBytes {
-			t.Errorf("%s: data = %d bytes > %d", tool.Name, len(res.Data), capkit.MaxDataBytes)
+		if len(res.Data) > core.MaxDataBytes {
+			t.Errorf("%s: data = %d bytes > %d", tool.Name, len(res.Data), core.MaxDataBytes)
 		}
 		// Status must agree with the presence of an error atom.
-		if res.Error != nil && res.Status == capkit.StatusSuccess {
+		if res.Error != nil && res.Status == core.StatusSuccess {
 			t.Errorf("%s: success status with an error atom %+v", tool.Name, res.Error)
 		}
 	}
@@ -150,11 +150,11 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 
 func codeKnown(code string) bool {
 	switch code {
-	case capkit.CodeInvalidInput, capkit.CodeScopeDenied, capkit.CodeApprovalRequired,
-		capkit.CodeNotFound, capkit.CodeConflict, capkit.CodeRateLimited,
-		capkit.CodeUnavailable, capkit.CodeInternal, capkit.CodeNeedHuman,
-		capkit.CodeToolMissing, capkit.CodeTargetUnreachable, capkit.CodeTimeout,
-		capkit.CodeUpstreamError, capkit.CodeEvidenceWriteFailed:
+	case core.CodeInvalidInput, core.CodeScopeDenied, core.CodeApprovalRequired,
+		core.CodeNotFound, core.CodeConflict, core.CodeRateLimited,
+		core.CodeUnavailable, core.CodeInternal, core.CodeNeedHuman,
+		core.CodeToolMissing, core.CodeTargetUnreachable, core.CodeTimeout,
+		core.CodeUpstreamError, core.CodeEvidenceWriteFailed:
 		return true
 	}
 	return false

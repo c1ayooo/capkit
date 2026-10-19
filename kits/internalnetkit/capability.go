@@ -1,10 +1,10 @@
 // Package internalnetkit performs internal-network reconnaissance from an
 // established foothold (docs 究极渗透能力包实现方案 §4.10, phase P2).
 //
-// Everything here runs THROUGH a capkit.Session: host surveys, live-host
+// Everything here runs THROUGH a core.Session: host surveys, live-host
 // discovery, port scanning, domain information gathering and SMB share
 // enumeration are all executed on the target side with `Exec`, never from the
-// machine running the kit. Sessions are resolved from capkit.Deps.Sessions, so
+// machine running the kit. Sessions are resolved from core.Deps.Sessions, so
 // a WebShell, SSH, WinRM or CLI foothold is used identically.
 //
 // Output parsing lives in parse.go as pure functions (cheap to test, fail
@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Bounds. Every tool caps how much work it will do on the target so an agent
@@ -47,20 +47,20 @@ const (
 
 // Capability exposes the internal-network reconnaissance tools.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 }
 
 // NewCapability builds the capability.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // Manifest declares the internalnetkit tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "internalnetkit", Version: "0.1.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "sessions"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			localInfoSpec(),
 			hostDiscoverySpec(),
 			portScanSpec(),
@@ -70,18 +70,18 @@ func Manifest() capkit.Manifest {
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches one tool invocation and normalizes the envelope on every
 // return path (Status/OK/Meta.Tool/Meta.Version/Summary clamp).
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := c.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
 // dispatch routes the call to the tool implementation.
-func (c *Capability) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "inet_local_info":
 		return c.localInfo(ctx, call)
@@ -94,32 +94,32 @@ func (c *Capability) dispatch(ctx context.Context, call capkit.Call) (capkit.Res
 	case "inet_smb_shares":
 		return c.smbShares(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
 // ---- session + command helpers ----
 
-func (c *Capability) session(id string) (capkit.Session, *capkit.Error) {
+func (c *Capability) session(id string) (core.Session, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	if strings.TrimSpace(id) == "" {
-		return nil, capkit.InvalidInput("session_id 必填")
+		return nil, core.InvalidInput("session_id 必填")
 	}
 	s, ok := c.deps.Sessions.Get(id)
 	if !ok {
-		return nil, capkit.NotFound("会话不存在: " + id)
+		return nil, core.NotFound("会话不存在: " + id)
 	}
 	return s, nil
 }
 
 // run executes one command through the foothold. A transport error is
 // reported as !ok; the caller decides whether that is fatal or partial.
-func (c *Capability) run(ctx context.Context, s capkit.Session, cmd string, timeout time.Duration) (capkit.Output, bool) {
-	out, err := s.Exec(ctx, cmd, capkit.ExecOpts{Timeout: timeout, MaxOutput: 256 << 10})
+func (c *Capability) run(ctx context.Context, s core.Session, cmd string, timeout time.Duration) (core.Output, bool) {
+	out, err := s.Exec(ctx, cmd, core.ExecOpts{Timeout: timeout, MaxOutput: 256 << 10})
 	if err != nil {
-		return capkit.Output{Command: cmd}, false
+		return core.Output{Command: cmd}, false
 	}
 	return out, true
 }
@@ -135,7 +135,7 @@ func clampMax(v, def, hard int) int {
 }
 
 // detectOS resolves the session OS, probing with `uname -s` when unset.
-func (c *Capability) detectOS(ctx context.Context, s capkit.Session, to time.Duration) string {
+func (c *Capability) detectOS(ctx context.Context, s core.Session, to time.Duration) string {
 	if os := strings.ToLower(strings.TrimSpace(s.Info().OS)); os != "" {
 		if strings.Contains(os, "win") {
 			return "windows"
@@ -148,16 +148,16 @@ func (c *Capability) detectOS(ctx context.Context, s capkit.Session, to time.Dur
 	return "windows"
 }
 
-func osName(s capkit.Session) string { return strings.ToLower(strings.TrimSpace(s.Info().OS)) }
+func osName(s core.Session) string { return strings.ToLower(strings.TrimSpace(s.Info().OS)) }
 
 // ---- tool specs ----
 
-func localInfoSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func localInfoSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "inet_local_info",
 		Description: "在已建立会话的主机上执行有界只读信息收集（主机名、网络接口/路由、OS、用户、登录、ARP、监听端口；Windows 另含 systeminfo/管理员组/进程）。全部命令经会话执行，不触碰本机网络。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -185,12 +185,12 @@ func localInfoSpec() capkit.ToolSpec {
 	}
 }
 
-func hostDiscoverySpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func hostDiscoverySpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "inet_host_discovery",
 		Description: "从会话出发对给定 CIDR/网段做存活主机发现（ping 扫描 / arp -a / /dev/tcp 探测），全部经会话 shell 执行。有界：主机数封顶、命令有超时。返回存活主机与证据。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -210,7 +210,7 @@ func hostDiscoverySpec() capkit.ToolSpec {
     "hosts":{"type":"array","items":{"type":"object","properties":{"host":{"type":"string"},"method":{"type":"string"},"mac":{"type":"string"}}}}
   }
 }`),
-		ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+		ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 			var in struct {
 				CIDR string `json:"cidr"`
 			}
@@ -220,17 +220,17 @@ func hostDiscoverySpec() capkit.ToolSpec {
 			if strings.TrimSpace(in.CIDR) == "" {
 				return nil, fmt.Errorf("cidr 必填")
 			}
-			return capkit.TargetsFromStrings(0, []string{in.CIDR})
+			return core.TargetsFromStrings(0, []string{in.CIDR})
 		},
 	}
 }
 
-func portScanSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func portScanSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "inet_portscan",
 		Description: "从会话出发对给定主机/网段做 TCP 端口扫描（bash /dev/tcp 或 nc），返回开放端口与服务名。有界：主机/端口数封顶，单主机并发 <=2。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: scanConcurrency},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: scanConcurrency},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -258,7 +258,7 @@ func portScanSpec() capkit.ToolSpec {
     "open":{"type":"array","items":{"type":"object","properties":{"host":{"type":"string"},"port":{"type":"integer"},"service":{"type":"string"}}}}
   }
 }`),
-		ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+		ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 			var in struct {
 				Hosts []string `json:"hosts"`
 				CIDR  string   `json:"cidr"`
@@ -273,17 +273,17 @@ func portScanSpec() capkit.ToolSpec {
 			if len(raws) == 0 {
 				return nil, fmt.Errorf("hosts 或 cidr 至少一个必填")
 			}
-			return capkit.TargetsFromStrings(0, raws)
+			return core.TargetsFromStrings(0, raws)
 		},
 	}
 }
 
-func domainInfoSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func domainInfoSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "inet_domain_info",
 		Description: "从会话出发做域信息收集（net user|group /domain、nltest /dclist|/domain_trusts、类 Unix 的 realm/net ads/ldapsearch），解析域、用户、组、信任关系与域控。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -306,12 +306,12 @@ func domainInfoSpec() capkit.ToolSpec {
 	}
 }
 
-func smbSharesSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func smbSharesSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "inet_smb_shares",
 		Description: "从会话出发枚举 SMB 共享（Windows net view/net share，类 Unix smbclient -L），返回共享名、类型与访问提示。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -328,7 +328,7 @@ func smbSharesSpec() capkit.ToolSpec {
     "shares":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"comment":{"type":"string"},"access":{"type":"string"}}}}
   }
 }`),
-		ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+		ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 			var in struct {
 				Host string `json:"host"`
 			}
@@ -338,7 +338,7 @@ func smbSharesSpec() capkit.ToolSpec {
 			if strings.TrimSpace(in.Host) == "" {
 				return nil, nil // local-share enumeration has no remote target
 			}
-			return capkit.TargetsFromStrings(0, []string{in.Host})
+			return core.TargetsFromStrings(0, []string{in.Host})
 		},
 	}
 }
@@ -363,24 +363,24 @@ type LocalInfo struct {
 	Errors     []string       `json:"errors,omitempty"`
 }
 
-func (c *Capability) localInfo(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) localInfo(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string `json:"session_id"`
 		TimeoutMS int    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	cmdTo := firstDur(to/3, defaultCmdTimeout)
 	os := c.detectOS(ctx, s, cmdTo)
 
 	out := LocalInfo{OS: os}
-	var outs []capkit.Output
+	var outs []core.Output
 	collect := func(cmd string) string {
 		o, ok := c.run(ctx, s, cmd, cmdTo)
 		outs = append(outs, o)
@@ -414,11 +414,11 @@ func (c *Capability) localInfo(ctx context.Context, call capkit.Call) (capkit.Re
 		out.Listeners = parseSsListeners(collect("ss -tunlp"))
 	}
 
-	res, err := capkit.SuccessResult(localSummary(&out), out)
+	res, err := core.SuccessResult(localSummary(&out), out)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res.Evidence = capkit.EvidenceRefs(outs...)
+	res.Evidence = core.EvidenceRefs(outs...)
 	applyLocalStatus(&res, out.Errors)
 	res.Next = localNextSteps(in.SessionID, out.Interfaces)
 	return res, nil
@@ -446,26 +446,26 @@ func sessionLabel(user, host string) string {
 	}
 }
 
-func applyLocalStatus(res *capkit.Result, errs []string) {
+func applyLocalStatus(res *core.Result, errs []string) {
 	switch {
 	case len(errs) == 0:
-		res.Status, res.OK = capkit.StatusSuccess, true
+		res.Status, res.OK = core.StatusSuccess, true
 	case len(errs) >= 4:
 		// Nothing useful was collected: fail rather than return an empty shell.
-		res.Status, res.OK = capkit.StatusFailed, false
-		res.Error = capkit.Unavailable("主机信息收集基本失败")
+		res.Status, res.OK = core.StatusFailed, false
+		res.Error = core.Unavailable("主机信息收集基本失败")
 	default:
-		res.Status, res.OK = capkit.StatusPartial, true
+		res.Status, res.OK = core.StatusPartial, true
 	}
 }
 
-func localNextSteps(sessionID string, ifaces []NetInterface) []capkit.NextStep {
-	var next []capkit.NextStep
+func localNextSteps(sessionID string, ifaces []NetInterface) []core.NextStep {
+	var next []core.NextStep
 	for _, cidr := range localCIDRs(ifaces) {
 		params, _ := json.Marshal(map[string]any{"session_id": sessionID, "cidr": cidr})
-		next = append(next, capkit.NextStep{
+		next = append(next, core.NextStep{
 			Tool: "inet_host_discovery", Reason: "对内网网段 " + cidr + " 做存活探测",
-			Risk: capkit.RiskMedium, Params: params,
+			Risk: core.RiskMedium, Params: params,
 		})
 		if len(next) >= 4 {
 			break
@@ -525,7 +525,7 @@ type HostDiscovery struct {
 	Hosts     []DiscoveredHost `json:"hosts"`
 }
 
-func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) hostDiscovery(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string `json:"session_id"`
 		CIDR      string `json:"cidr"`
@@ -534,27 +534,27 @@ func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capki
 		TimeoutMS int    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	_, ipnet, err := net.ParseCIDR(strings.TrimSpace(in.CIDR))
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput("cidr 非法: " + in.CIDR)), nil
+		return core.FailResult(core.InvalidInput("cidr 非法: " + in.CIDR)), nil
 	}
 	if ipnet.IP.To4() == nil {
-		return capkit.FailResult(capkit.InvalidInput("仅支持 IPv4 网段: " + in.CIDR)), nil
+		return core.FailResult(core.InvalidInput("仅支持 IPv4 网段: " + in.CIDR)), nil
 	}
 	method := strings.ToLower(strings.TrimSpace(in.Method))
 	if method == "" {
 		method = "ping"
 	}
 	if method != "ping" && method != "arp" && method != "tcp" {
-		return capkit.FailResult(capkit.InvalidInput("method 仅支持 ping|arp|tcp")), nil
+		return core.FailResult(core.InvalidInput("method 仅支持 ping|arp|tcp")), nil
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	cmdTo := firstDur(to, defaultTimeout)
 	maxHosts := clampMax(in.MaxHosts, discoveryDefaultMaxHosts, discoveryHardMaxHosts)
 
@@ -562,7 +562,7 @@ func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capki
 	os := c.detectOS(ctx, s, cmdTo)
 
 	alive := map[string]bool{}
-	var outs []capkit.Output
+	var outs []core.Output
 
 	probe := func(cmd string) string {
 		o, ok := c.run(ctx, s, cmd, cmdTo)
@@ -621,16 +621,16 @@ func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capki
 	sort.Slice(list, func(i, j int) bool { return ipLess(list[i].Host, list[j].Host) })
 
 	payload := HostDiscovery{CIDR: ipnet.String(), Method: method, Probed: len(hosts), Truncated: truncated, Hosts: list}
-	res, err := capkit.SuccessResult(fmt.Sprintf("枚举内网主机：网段 %s 探测 %d 台，%d 台存活",
+	res, err := core.SuccessResult(fmt.Sprintf("枚举内网主机：网段 %s 探测 %d 台，%d 台存活",
 		ipnet.String(), len(hosts), len(list)), payload)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res.Evidence = capkit.EvidenceRefs(outs...)
+	res.Evidence = core.EvidenceRefs(outs...)
 	res.Truncated = truncated
-	res.Next = []capkit.NextStep{{
+	res.Next = []core.NextStep{{
 		Tool: "inet_portscan", Reason: "对存活主机做端口扫描",
-		Risk:   capkit.RiskMedium,
+		Risk:   core.RiskMedium,
 		Params: mustJSON(map[string]any{"session_id": in.SessionID, "hosts": hostList(list), "ports": "21,22,80,135,139,443,445,3389,5985,8080"}),
 	}}
 	return res, nil
@@ -664,7 +664,7 @@ type PortScan struct {
 	Open        []OpenPort `json:"open"`
 }
 
-func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) portScan(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string   `json:"session_id"`
 		Hosts     []string `json:"hosts"`
@@ -679,29 +679,29 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 		PageSize  int      `json:"page_size"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	maxPorts := clampMax(in.MaxPorts, scanDefaultMaxPorts, scanHardMaxPorts)
 	ports := parsePortSpec(in.Ports, maxPorts)
 	if len(ports) == 0 {
-		return capkit.FailResult(capkit.InvalidInput("ports 非法或为空")), nil
+		return core.FailResult(core.InvalidInput("ports 非法或为空")), nil
 	}
 	portsTruncated := len(ports) == maxPorts
 
 	maxHosts := clampMax(in.MaxHosts, scanDefaultMaxHosts, scanHardMaxHosts)
 	hosts, hostsTruncated, e2 := resolveHosts(in.Hosts, in.CIDR, maxHosts)
 	if e2 != nil {
-		return capkit.FailResult(e2), nil
+		return core.FailResult(e2), nil
 	}
 	if len(hosts) == 0 {
-		return capkit.FailResult(capkit.InvalidInput("hosts 或 cidr 至少一个必填")), nil
+		return core.FailResult(core.InvalidInput("hosts 或 cidr 至少一个必填")), nil
 	}
 
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	cmdTo := firstDur(to, maxTimeout)
 	tool := strings.ToLower(strings.TrimSpace(in.Tool))
 	if tool == "" {
@@ -714,7 +714,7 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 
 	var (
 		mu    sync.Mutex
-		outs  []capkit.Output
+		outs  []core.Output
 		all   []OpenPort
 		fails int
 	)
@@ -743,9 +743,9 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 	all = dedupePorts(all)
 	// A scan can open more ports than one envelope should carry, so the list is
 	// paged with a cursor (docs §5.5.4).
-	start, end, page, perr := capkit.PageWindow(len(all), in.Cursor, in.PageSize)
+	start, end, page, perr := core.PageWindow(len(all), in.Cursor, in.PageSize)
 	if perr != nil {
-		return capkit.FailResult(perr), nil
+		return core.FailResult(perr), nil
 	}
 	window := all[start:end]
 	payload := PortScan{
@@ -754,7 +754,7 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 		OpenCount: len(window), TotalOpen: len(all), Open: window,
 	}
 
-	status := capkit.StatusSuccess
+	status := core.StatusSuccess
 	ok := true
 	summary := fmt.Sprintf("扫描 %s 的 %d 个端口，开放 %d 个", hostLabel(hosts), len(ports), len(all))
 	if open := openPortList(all); open != "" {
@@ -764,23 +764,23 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 		summary += fmt.Sprintf("（本页 %d，用 page.cursor 续取）", len(window))
 	}
 	if fails == len(hosts) {
-		status, ok = capkit.StatusFailed, false
+		status, ok = core.StatusFailed, false
 		summary = fmt.Sprintf("扫描 %s 失败：会话命令均未执行", hostLabel(hosts))
 	} else if fails > 0 {
-		status, ok = capkit.StatusPartial, true
+		status, ok = core.StatusPartial, true
 		summary += fmt.Sprintf("（%d/%d 台主机命令失败）", fails, len(hosts))
 	}
-	res, err := capkit.SuccessResult(summary, payload)
+	res, err := core.SuccessResult(summary, payload)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
 	res.Status, res.OK = status, ok
 	if !ok {
-		res.Error = capkit.Unavailable("端口扫描全部失败")
+		res.Error = core.Unavailable("端口扫描全部失败")
 	}
 	res.Truncated = payload.Truncated || page.HasMore
 	res.Page = page
-	res.Evidence = capkit.EvidenceRefs(outs...)
+	res.Evidence = core.EvidenceRefs(outs...)
 	return res, nil
 }
 
@@ -830,7 +830,7 @@ func portScanCmd(host string, ports []int, tool string, perPortMS int) string {
 		` bash -c ">/dev/tcp/` + host + `/$p" 2>/dev/null && echo "OPEN ` + host + ` $p"; done`
 }
 
-func resolveHosts(hosts []string, cidr string, max int) ([]string, bool, *capkit.Error) {
+func resolveHosts(hosts []string, cidr string, max int) ([]string, bool, *core.Error) {
 	seen := map[string]bool{}
 	var out []string
 	add := func(h string) {
@@ -848,7 +848,7 @@ func resolveHosts(hosts []string, cidr string, max int) ([]string, bool, *capkit
 	if strings.TrimSpace(cidr) != "" {
 		_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cidr))
 		if err != nil || ipnet.IP.To4() == nil {
-			return nil, false, capkit.InvalidInput("cidr 非法: " + cidr)
+			return nil, false, core.InvalidInput("cidr 非法: " + cidr)
 		}
 		expanded, expTrunc := enumerateCIDR(ipnet, max)
 		for _, h := range expanded {
@@ -894,25 +894,25 @@ type DomainInfo struct {
 	DCs    []string `json:"dcs,omitempty"`
 }
 
-func (c *Capability) domainInfo(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) domainInfo(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string `json:"session_id"`
 		Domain    string `json:"domain"`
 		TimeoutMS int    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	cmdTo := firstDur(to, defaultTimeout)
 	os := c.detectOS(ctx, s, cmdTo)
 
 	out := DomainInfo{Domain: strings.TrimSpace(in.Domain)}
-	var outs []capkit.Output
+	var outs []core.Output
 	run := func(cmd string) string {
 		o, ok := c.run(ctx, s, cmd, cmdTo)
 		outs = append(outs, o)
@@ -945,7 +945,7 @@ func (c *Capability) domainInfo(ctx context.Context, call capkit.Call) (capkit.R
 		}
 		if osName(s) == "" && out.Domain == "" && len(out.Trusts) == 0 {
 			// Unidentified host OS with no domain evidence: nothing to report.
-			return capkit.FailResult(capkit.Unavailable("未识别到域环境或域命令不可用")), nil
+			return core.FailResult(core.Unavailable("未识别到域环境或域命令不可用")), nil
 		}
 	}
 
@@ -954,11 +954,11 @@ func (c *Capability) domainInfo(ctx context.Context, call capkit.Call) (capkit.R
 	if len(out.DCs) > 0 {
 		summary += "，域控 " + joinCapped(out.DCs, 3)
 	}
-	res, err := capkit.SuccessResult(summary, out)
+	res, err := core.SuccessResult(summary, out)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res.Evidence = capkit.EvidenceRefs(outs...)
+	res.Evidence = core.EvidenceRefs(outs...)
 	return res, nil
 }
 
@@ -971,20 +971,20 @@ type SMBResult struct {
 	Shares []Share `json:"shares"`
 }
 
-func (c *Capability) smbShares(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) smbShares(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string `json:"session_id"`
 		Host      string `json:"host"`
 		TimeoutMS int    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	cmdTo := firstDur(to, defaultTimeout)
 	target := strings.TrimSpace(in.Host)
 	os := c.detectOS(ctx, s, cmdTo)
@@ -1002,7 +1002,7 @@ func (c *Capability) smbShares(ctx context.Context, call capkit.Call) (capkit.Re
 		cmds = []string{"smbclient -L //" + target + " -N"}
 	}
 
-	var outs []capkit.Output
+	var outs []core.Output
 	var shares []Share
 	seen := map[string]bool{}
 	for _, cmd := range cmds {
@@ -1030,11 +1030,11 @@ func (c *Capability) smbShares(ctx context.Context, call capkit.Call) (capkit.Re
 	if names := joinCapped(shareNames(shares), 5); names != "" {
 		summary += "（" + names + "）"
 	}
-	res, err := capkit.SuccessResult(summary, SMBResult{Target: displayTarget, Count: len(shares), Shares: shares})
+	res, err := core.SuccessResult(summary, SMBResult{Target: displayTarget, Count: len(shares), Shares: shares})
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res.Evidence = capkit.EvidenceRefs(outs...)
+	res.Evidence = core.EvidenceRefs(outs...)
 	return res, nil
 }
 

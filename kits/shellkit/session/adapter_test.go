@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/shellkit/session"
 )
 
@@ -29,9 +29,9 @@ func (f *fakeExec) File(_ context.Context, _ session.Session, op session.FileOp)
 	return &session.ExecResult{Output: "ok", HTTPStatus: 200}, nil
 }
 
-var _ capkit.Session = (*session.CapabilitySession)(nil)
-var _ capkit.Uploader = (*session.CapabilitySession)(nil)
-var _ capkit.Downloader = (*session.CapabilitySession)(nil)
+var _ core.Session = (*session.CapabilitySession)(nil)
+var _ core.Uploader = (*session.CapabilitySession)(nil)
+var _ core.Downloader = (*session.CapabilitySession)(nil)
 
 func newSession(exec session.Executor) *session.CapabilitySession {
 	return &session.CapabilitySession{
@@ -43,7 +43,7 @@ func newSession(exec session.Executor) *session.CapabilitySession {
 func TestAdapterExec(t *testing.T) {
 	f := &fakeExec{}
 	s := newSession(f)
-	out, err := s.Exec(context.Background(), "id", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "id", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,12 @@ func TestAdapterExec(t *testing.T) {
 		t.Fatalf("evidence = %q", out.EvidenceID)
 	}
 	// dir is prepended
-	_, _ = s.Exec(context.Background(), "ls", capkit.ExecOpts{Dir: "/tmp"})
+	_, _ = s.Exec(context.Background(), "ls", core.ExecOpts{Dir: "/tmp"})
 	if !strings.HasPrefix(f.last, "cd /tmp &&") {
 		t.Fatalf("dir not applied: %q", f.last)
 	}
 	// empty command rejected
-	if _, err := s.Exec(context.Background(), "  ", capkit.ExecOpts{}); err == nil {
+	if _, err := s.Exec(context.Background(), "  ", core.ExecOpts{}); err == nil {
 		t.Fatal("expected empty-command error")
 	}
 }
@@ -109,7 +109,7 @@ func TestAdapterDownload(t *testing.T) {
 
 func TestAdapterNilExecutor(t *testing.T) {
 	s := &session.CapabilitySession{}
-	if _, err := s.Exec(context.Background(), "id", capkit.ExecOpts{}); err == nil {
+	if _, err := s.Exec(context.Background(), "id", core.ExecOpts{}); err == nil {
 		t.Fatal("expected executor-missing error")
 	}
 	if err := s.Upload(context.Background(), strings.NewReader("x"), "/y"); err == nil {

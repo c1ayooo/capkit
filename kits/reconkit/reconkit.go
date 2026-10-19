@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type AssetKind string
@@ -94,9 +94,9 @@ type Pipeline struct {
 	Ports    PortScanner
 	HTTP     HTTPProber
 	Sink     AssetSink
-	Scope    capkit.ScopeChecker
-	Limiter  capkit.Limiter
-	Evidence capkit.EvidenceSink
+	Scope    core.ScopeChecker
+	Limiter  core.Limiter
+	Evidence core.EvidenceSink
 }
 
 func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
@@ -123,7 +123,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 			}
 		}
 	}
-	scope := func(t capkit.Target) bool {
+	scope := func(t core.Target) bool {
 		if err := p.Scope.Check(ctx, t); err != nil {
 			stats.Errors = append(stats.Errors, "scope "+t.Key()+": "+err.Error())
 			return false
@@ -134,7 +134,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 		if p.Limiter == nil {
 			return func() {}
 		}
-		release, err := p.Limiter.Acquire(ctx, key, capkit.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4})
+		release, err := p.Limiter.Acquire(ctx, key, core.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4})
 		if err != nil {
 			stats.Errors = append(stats.Errors, "limit "+key+": "+err.Error())
 			return func() {}
@@ -152,7 +152,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 			continue
 		}
 		stats.Domains++
-		dTarget := capkit.Target{Kind: capkit.TargetDomain, Host: domain}
+		dTarget := core.Target{Kind: core.TargetDomain, Host: domain}
 		if !scope(dTarget) {
 			continue
 		}
@@ -171,7 +171,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 				if sub == "" {
 					continue
 				}
-				if !scope(capkit.Target{Kind: capkit.TargetDomain, Host: sub}) {
+				if !scope(core.Target{Kind: core.TargetDomain, Host: sub}) {
 					continue
 				}
 				stats.Subdomains++
@@ -200,7 +200,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 					if net.ParseIP(ip) == nil {
 						continue
 					}
-					if !scope(capkit.Target{Kind: capkit.TargetIP, IP: ip}) {
+					if !scope(core.Target{Kind: core.TargetIP, IP: ip}) {
 						continue
 					}
 					hosts[ip] = true
@@ -251,7 +251,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 	}
 
 	if p.Evidence != nil {
-		_, _ = p.Evidence.Record(ctx, capkit.Evidence{
+		_, _ = p.Evidence.Record(ctx, core.Evidence{
 			Kind: "recon", Title: "recon pipeline", CreatedAt: time.Now(),
 			Metadata: map[string]string{
 				"domains": fmt.Sprint(stats.Domains), "subdomains": fmt.Sprint(stats.Subdomains),
@@ -262,7 +262,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Stats, error) {
 	return stats, nil
 }
 
-func probeHTTP(ctx context.Context, p *Pipeline, stats *Stats, host string, port int, emit func(Asset), scope func(capkit.Target) bool, acquire func(string) func()) {
+func probeHTTP(ctx context.Context, p *Pipeline, stats *Stats, host string, port int, emit func(Asset), scope func(core.Target) bool, acquire func(string) func()) {
 	scheme := "http"
 	if port == 443 || port == 8443 {
 		scheme = "https"
@@ -295,11 +295,11 @@ func probeHTTP(ctx context.Context, p *Pipeline, stats *Stats, host string, port
 	emit(Asset{Kind: AssetURL, Value: url, Parent: host, Meta: meta})
 }
 
-func targetForHost(host string) capkit.Target {
+func targetForHost(host string) core.Target {
 	if net.ParseIP(host) != nil {
-		return capkit.Target{Kind: capkit.TargetIP, IP: host}
+		return core.Target{Kind: core.TargetIP, IP: host}
 	}
-	return capkit.Target{Kind: capkit.TargetDomain, Host: host}
+	return core.Target{Kind: core.TargetDomain, Host: host}
 }
 
 func dedupe(in []string) []string {

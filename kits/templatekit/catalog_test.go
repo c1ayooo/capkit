@@ -7,7 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 func loadTestPack(t *testing.T) *Pack {
@@ -48,19 +48,19 @@ func TestCatalogSearchAndGet(t *testing.T) {
 	if cat.Count() != 2 {
 		t.Fatalf("count = %d", cat.Count())
 	}
-	refs, err := cat.Search(context.Background(), capkit.TemplateQuery{Products: []string{"weaver"}})
+	refs, err := cat.Search(context.Background(), core.TemplateQuery{Products: []string{"weaver"}})
 	if err != nil || len(refs) != 1 || refs[0].ID != "weaver/eoffice-sqli" {
 		t.Fatalf("products search = %+v, %v", refs, err)
 	}
-	refs, _ = cat.Search(context.Background(), capkit.TemplateQuery{CVE: "CVE-2021-44228"})
+	refs, _ = cat.Search(context.Background(), core.TemplateQuery{CVE: "CVE-2021-44228"})
 	if len(refs) != 1 || refs[0].Kind != "nuclei" {
 		t.Fatalf("cve search = %+v", refs)
 	}
-	refs, _ = cat.Search(context.Background(), capkit.TemplateQuery{Tags: []string{"sqli"}})
+	refs, _ = cat.Search(context.Background(), core.TemplateQuery{Tags: []string{"sqli"}})
 	if len(refs) != 1 || refs[0].ID != "weaver/eoffice-sqli" {
 		t.Fatalf("tag search = %+v", refs)
 	}
-	refs, _ = cat.Search(context.Background(), capkit.TemplateQuery{Text: "log4j"})
+	refs, _ = cat.Search(context.Background(), core.TemplateQuery{Text: "log4j"})
 	if len(refs) != 1 || refs[0].ID != "CVE-2021-44228" {
 		t.Fatalf("text search = %+v", refs)
 	}

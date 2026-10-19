@@ -4,7 +4,7 @@
 // The host owns policy: scope, approval, evidence, storage, secrets, audit and
 // rate limiting are injected as ports. Capability kits only depend on this
 // package, never on each other or on a host project.
-package capkit
+package core
 
 import (
 	"context"

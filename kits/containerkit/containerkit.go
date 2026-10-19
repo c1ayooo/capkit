@@ -6,14 +6,14 @@
 //
 //   - Network probes (k8s_kubelet_probe, k8s_apiserver_probe, k8s_etcd_probe,
 //     docker_api_probe) that talk to exposed control-plane and daemon ports
-//     through the injected capkit.HTTPDoer, so scope, rate limiting and audit
+//     through the injected core.HTTPDoer, so scope, rate limiting and audit
 //     gates cannot be bypassed.
 //   - Foothold triage (container_escape_check, container_escape_plan) that runs
-//     bounded read-only checks through an existing capkit.Session and turns the
+//     bounded read-only checks through an existing core.Session and turns the
 //     result into ranked, non-executing next steps.
 //
 // The package never executes an escape. container_escape_plan is decision
-// support only: it returns candidate techniques as capkit.NextStep items with
+// support only: it returns candidate techniques as core.NextStep items with
 // the preconditions each one needs.
 package containerkit
 
@@ -22,7 +22,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Version is the capability version reported in the manifest and Meta.
@@ -31,33 +31,33 @@ const Version = "0.1.0"
 // Capability is the registry/capability adapter. It holds only injected ports
 // and no mutable state, so Call is safe for concurrent use.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 }
 
 // NewCapability builds the capability from injected ports. Missing ports are
 // not fatal here: each tool checks the port it needs and returns a precise
 // ToolMissing/Unavailable envelope instead of failing construction.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // Manifest declares the six container/k8s tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "containerkit", Version: Version, APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "http", "sessions"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			kubeletProbeSpec(), apiserverProbeSpec(), etcdProbeSpec(), dockerProbeSpec(),
 			escapeCheckSpec(), escapePlanSpec(),
 		},
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches by tool name and always returns a Result envelope.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "k8s_kubelet_probe":
 		return c.kubeletProbe(ctx, call)
@@ -72,12 +72,12 @@ func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result,
 	case "container_escape_plan":
 		return c.escapePlan(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
 // stamp fills the fixed Meta fields every handler must carry.
-func stamp(res capkit.Result, tool string, start time.Time) capkit.Result {
+func stamp(res core.Result, tool string, start time.Time) core.Result {
 	res.Meta.Tool = tool
 	res.Meta.Version = Version
 	if res.Meta.DurationMS == 0 {
@@ -88,15 +88,15 @@ func stamp(res capkit.Result, tool string, start time.Time) capkit.Result {
 
 // decodeJSON unmarshals call input, converting failures into the stable
 // invalid_input envelope.
-func decodeJSON(input json.RawMessage, out any) *capkit.Error {
+func decodeJSON(input json.RawMessage, out any) *core.Error {
 	if err := json.Unmarshal(input, out); err != nil {
-		return capkit.InvalidInput(err.Error())
+		return core.InvalidInput(err.Error())
 	}
 	return nil
 }
 
 // dataMap is a small helper mirroring exploitkit's envelope construction.
-func dataMap(summary string, v any) capkit.Result {
-	res, _ := capkit.SuccessResult(summary, v)
+func dataMap(summary string, v any) core.Result {
+	res, _ := core.SuccessResult(summary, v)
 	return res
 }

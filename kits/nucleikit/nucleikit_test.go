@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/harness/fakenuclei"
 	"github.com/c1ayooo/capkit/runtime"
@@ -17,7 +17,7 @@ import (
 
 func newNucleiRuntime(t *testing.T, runner *fakenuclei.Runner, binaries *fakenuclei.Binaries) *runtime.Runtime {
 	t.Helper()
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterNuclei(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestNucleiScanParsesJSONL(t *testing.T) {
 		"targets": []string{"http://127.0.0.1:18080"},
 		"tags":    []string{"cve"},
 	})
-	res, err := rt.Call(context.Background(), "nuclei_scan", input, capkit.CallContext{ProjectID: 1, Actor: "tester"})
+	res, err := rt.Call(context.Background(), "nuclei_scan", input, core.CallContext{ProjectID: 1, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,22 +83,22 @@ func TestNucleiScanScopeDenied(t *testing.T) {
 	binaries := &fakenuclei.Binaries{Path: "/fake/nuclei"}
 	rt := newNucleiRuntime(t, runner, binaries)
 	input, _ := json.Marshal(map[string]any{"targets": []string{"http://example.com"}})
-	_, err := rt.Call(context.Background(), "nuclei_scan", input, capkit.CallContext{ProjectID: 1})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeScopeDenied) {
+	_, err := rt.Call(context.Background(), "nuclei_scan", input, core.CallContext{ProjectID: 1})
+	if err == nil || !strings.Contains(err.Error(), core.CodeScopeDenied) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestNucleiStatus(t *testing.T) {
-	binaries := &fakenuclei.Binaries{Path: "/fake/nuclei", State: capkit.BinaryStatus{
+	binaries := &fakenuclei.Binaries{Path: "/fake/nuclei", State: core.BinaryStatus{
 		Installed: true, Version: "test-1.0", Path: "/fake/nuclei",
 	}}
 	rt := newNucleiRuntime(t, &fakenuclei.Runner{}, binaries)
-	res, err := rt.Call(context.Background(), "nuclei_status", json.RawMessage(`{}`), capkit.CallContext{})
+	res, err := rt.Call(context.Background(), "nuclei_status", json.RawMessage(`{}`), core.CallContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var data capkit.BinaryStatus
+	var data core.BinaryStatus
 	if err := json.Unmarshal(res.Data, &data); err != nil {
 		t.Fatal(err)
 	}

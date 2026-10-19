@@ -5,26 +5,26 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 )
 
 // fakeRunner records process specs and replays canned output, so the SMB
 // transport can be exercised without smbclient or a share.
 type fakeRunner struct {
-	specs  []capkit.ProcessSpec
+	specs  []core.ProcessSpec
 	stdout string
 	stderr string
 	exit   int
 	err    error
 }
 
-func (f *fakeRunner) Run(_ context.Context, spec capkit.ProcessSpec) (*capkit.ProcessResult, error) {
+func (f *fakeRunner) Run(_ context.Context, spec core.ProcessSpec) (*core.ProcessResult, error) {
 	f.specs = append(f.specs, spec)
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &capkit.ProcessResult{ExitCode: f.exit, Stdout: []byte(f.stdout), Stderr: []byte(f.stderr)}, nil
+	return &core.ProcessResult{ExitCode: f.exit, Stdout: []byte(f.stdout), Stderr: []byte(f.stderr)}, nil
 }
 
 type fakeArtifacts struct {
@@ -47,7 +47,7 @@ func (a *fakeArtifacts) Delete(context.Context, string) error        { return ni
 func TestSMBSessionExec(t *testing.T) {
 	r := &fakeRunner{stdout: "share-listing"}
 	o := &sessionkit.SMBOpener{Runner: r, Share: "ADMIN$"}
-	s, err := o.Open(context.Background(), capkit.SessionSpec{
+	s, err := o.Open(context.Background(), core.SessionSpec{
 		Kind: "smb", Host: "10.0.0.5", User: "admin", Secret: "pw", Domain: "CORP",
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestSMBSessionExec(t *testing.T) {
 	if info := s.Info(); info.Kind != "smb" || info.Meta["unc"] != "//10.0.0.5/ADMIN$" {
 		t.Fatalf("info = %+v", info)
 	}
-	out, err := s.Exec(context.Background(), "ls", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "ls", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +87,8 @@ func TestSMBSessionExec(t *testing.T) {
 func TestSMBSessionDownloadUsesCat(t *testing.T) {
 	r := &fakeRunner{stdout: "remote-file-content"}
 	o := &sessionkit.SMBOpener{Runner: r}
-	s, _ := o.Open(context.Background(), capkit.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
-	rc, err := s.(capkit.Downloader).Download(context.Background(), "secrets.txt")
+	s, _ := o.Open(context.Background(), core.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
+	rc, err := s.(core.Downloader).Download(context.Background(), "secrets.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,8 @@ func TestSMBSessionUploadStagesThroughArtifacts(t *testing.T) {
 	r := &fakeRunner{}
 	art := &fakeArtifacts{}
 	o := &sessionkit.SMBOpener{Runner: r, Artifacts: art}
-	s, _ := o.Open(context.Background(), capkit.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
-	if err := s.(capkit.Uploader).Upload(context.Background(), strings.NewReader("payload"), "/tmp/x"); err != nil {
+	s, _ := o.Open(context.Background(), core.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
+	if err := s.(core.Uploader).Upload(context.Background(), strings.NewReader("payload"), "/tmp/x"); err != nil {
 		t.Fatal(err)
 	}
 	if string(art.put) != "payload" {
@@ -121,7 +121,7 @@ func TestSMBSessionUploadStagesThroughArtifacts(t *testing.T) {
 
 func TestSMBOpenerRequiresRunner(t *testing.T) {
 	o := &sessionkit.SMBOpener{}
-	if _, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "smb", Host: "10.0.0.5"}); err == nil {
+	if _, err := o.Open(context.Background(), core.SessionSpec{Kind: "smb", Host: "10.0.0.5"}); err == nil {
 		t.Fatal("SMB opener without ProcessRunner must fail closed")
 	}
 }
@@ -129,8 +129,8 @@ func TestSMBOpenerRequiresRunner(t *testing.T) {
 func TestSMBDownloadSurfacesNonZeroExit(t *testing.T) {
 	r := &fakeRunner{stderr: "NT_STATUS_OBJECT_NAME_NOT_FOUND", exit: 1}
 	o := &sessionkit.SMBOpener{Runner: r}
-	s, _ := o.Open(context.Background(), capkit.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
-	if _, err := s.(capkit.Downloader).Download(context.Background(), "missing.txt"); err == nil {
+	s, _ := o.Open(context.Background(), core.SessionSpec{Kind: "smb", Host: "10.0.0.5", User: "u", Secret: "p"})
+	if _, err := s.(core.Downloader).Download(context.Background(), "missing.txt"); err == nil {
 		t.Fatal("a failed smbclient read must return an error")
 	}
 }

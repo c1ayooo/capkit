@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeSettings struct{ m map[string]string }
@@ -19,17 +19,17 @@ func (f fakeSettings) GetInt(context.Context, string) (int64, bool) { return 0, 
 
 type fakeLimiter struct{ n int }
 
-func (f *fakeLimiter) Acquire(context.Context, string, capkit.RateLimitSpec) (func(), error) {
+func (f *fakeLimiter) Acquire(context.Context, string, core.RateLimitSpec) (func(), error) {
 	f.n++
 	return func() {}, nil
 }
 
 type fakeFetcher struct {
-	resp *capkit.Response
-	last capkit.Request
+	resp *core.Response
+	last core.Request
 }
 
-func (f *fakeFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f *fakeFetcher) Fetch(_ context.Context, req core.Request) (*core.Response, error) {
 	f.last = req
 	return f.resp, nil
 }
@@ -53,7 +53,7 @@ const sampleJSON = `{
 }`
 
 func TestClientSearch(t *testing.T) {
-	fetcher := &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(sampleJSON)}}
+	fetcher := &fakeFetcher{resp: &core.Response{Status: 200, Body: []byte(sampleJSON)}}
 	lim := &fakeLimiter{}
 	c := &Client{
 		Fetcher: fetcher, Limiter: lim,
@@ -85,16 +85,16 @@ func TestClientSearch(t *testing.T) {
 }
 
 func TestClientMissingToken(t *testing.T) {
-	c := &Client{Fetcher: &fakeFetcher{resp: &capkit.Response{Status: 200}}, Settings: fakeSettings{}}
+	c := &Client{Fetcher: &fakeFetcher{resp: &core.Response{Status: 200}}, Settings: fakeSettings{}}
 	_, err := c.Search(context.Background(), "AKIA", 1, 10)
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeUnavailable) {
+	if err == nil || !strings.Contains(err.Error(), core.CodeUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestClientRejected(t *testing.T) {
 	c := &Client{
-		Fetcher:  &fakeFetcher{resp: &capkit.Response{Status: 403, Body: []byte(`{"message":"rate limited"}`)}},
+		Fetcher:  &fakeFetcher{resp: &core.Response{Status: 403, Body: []byte(`{"message":"rate limited"}`)}},
 		Settings: fakeSettings{m: map[string]string{"github.token": "t"}},
 	}
 	_, err := c.Search(context.Background(), "AKIA", 1, 10)

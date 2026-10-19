@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeProvider struct{ name string }
@@ -31,7 +31,7 @@ func TestKitSearchAndDetail(t *testing.T) {
 	kit := NewKit(ResolverFunc(func(context.Context, string) (Provider, error) {
 		return fakeProvider{name: "fake"}, nil
 	}))
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "enterprise_search", Input: []byte(`{"provider":"fake","keyword":"example"}`)})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "enterprise_search", Input: []byte(`{"provider":"fake","keyword":"example"}`)})
 	if err != nil || !res.OK {
 		t.Fatalf("search = %#v err=%v", res, err)
 	}
@@ -42,7 +42,7 @@ func TestKitSearchAndDetail(t *testing.T) {
 	if err := json.Unmarshal(res.Data, &out); err != nil || out.Count != 1 || out.Items[0].ExtID != "e1" {
 		t.Fatalf("search data=%s err=%v", res.Data, err)
 	}
-	res, err = kit.Call(context.Background(), capkit.Call{Tool: "enterprise_detail", Input: []byte(`{"provider":"fake","ext_id":"e1"}`)})
+	res, err = kit.Call(context.Background(), core.Call{Tool: "enterprise_detail", Input: []byte(`{"provider":"fake","ext_id":"e1"}`)})
 	if err != nil || !res.OK {
 		t.Fatalf("detail = %#v err=%v", res, err)
 	}

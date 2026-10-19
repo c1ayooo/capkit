@@ -8,35 +8,35 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 )
 
 // Config holds host-provided ports. Scope, Limiter and Audit are mandatory.
 type Config struct {
-	Scope     capkit.ScopeChecker
-	Approval  capkit.Approver
-	Evidence  capkit.EvidenceSink
-	HTTP      capkit.HTTPDoer
-	Fetcher   capkit.Fetcher
-	Limiter   capkit.Limiter
-	Audit     capkit.AuditSink
-	Settings  capkit.Settings
-	Sealer    capkit.Sealer
-	Logger    capkit.Logger
-	Clock     capkit.Clock
-	IDs       capkit.IDGenerator
-	Processes capkit.ProcessRunner
-	Artifacts capkit.ArtifactStore
-	Binaries  capkit.BinaryManager
+	Scope     core.ScopeChecker
+	Approval  core.Approver
+	Evidence  core.EvidenceSink
+	HTTP      core.HTTPDoer
+	Fetcher   core.Fetcher
+	Limiter   core.Limiter
+	Audit     core.AuditSink
+	Settings  core.Settings
+	Sealer    core.Sealer
+	Logger    core.Logger
+	Clock     core.Clock
+	IDs       core.IDGenerator
+	Processes core.ProcessRunner
+	Artifacts core.ArtifactStore
+	Binaries  core.BinaryManager
 
-	Fingerprints    capkit.FingerprintProvider
-	Templates       capkit.TemplateCatalog
-	TemplateEngines map[string]capkit.TemplateEngine
-	Sessions        capkit.SessionManager
+	Fingerprints    core.FingerprintProvider
+	Templates       core.TemplateCatalog
+	TemplateEngines map[string]core.TemplateEngine
+	Sessions        core.SessionManager
 
 	// RequireApprovalAt defaults to high.
-	RequireApprovalAt capkit.Risk
+	RequireApprovalAt core.Risk
 	// IdempotencyWindow bounds how long a result keyed by idempotency_key is
 	// reused. Defaults to 5 minutes; <=0 disables caching.
 	IdempotencyWindow time.Duration
@@ -50,17 +50,17 @@ type Config struct {
 
 type registeredTool struct {
 	capability string
-	spec       capkit.ToolSpec
+	spec       core.ToolSpec
 	version    string
 }
 
 // Runtime is the instance container. It never exposes a Register method: all
-// declarations live in capkit.Registry, and New builds instances from it.
+// declarations live in core.Registry, and New builds instances from it.
 type Runtime struct {
 	cfg        Config
 	chain      *gates.Chain
-	caps       map[string]capkit.Capability
-	manifests  map[string]capkit.Manifest
+	caps       map[string]core.Capability
+	manifests  map[string]core.Manifest
 	tools      map[string]registeredTool
 	idem       *idemCache
 	jobs       *jobRegistry
@@ -70,7 +70,7 @@ type Runtime struct {
 
 // New validates the registry against the provided ports and instantiates every
 // capability exactly once.
-func New(cfg Config, reg *capkit.Registry) (*Runtime, error) {
+func New(cfg Config, reg *core.Registry) (*Runtime, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("registry is required")
 	}
@@ -101,7 +101,7 @@ func New(cfg Config, reg *capkit.Registry) (*Runtime, error) {
 		cfg.Fetcher = countingFetcher{inner: cfg.Fetcher}
 	}
 
-	deps := capkit.Deps{
+	deps := core.Deps{
 		Scope: cfg.Scope, Approval: cfg.Approval, Evidence: cfg.Evidence,
 		HTTP: cfg.HTTP, Fetcher: cfg.Fetcher, Limiter: cfg.Limiter, Audit: cfg.Audit,
 		Settings: cfg.Settings, Sealer: cfg.Sealer, Logger: cfg.Logger,
@@ -116,8 +116,8 @@ func New(cfg Config, reg *capkit.Registry) (*Runtime, error) {
 
 	rt := &Runtime{
 		cfg:        cfg,
-		caps:       map[string]capkit.Capability{},
-		manifests:  map[string]capkit.Manifest{},
+		caps:       map[string]core.Capability{},
+		manifests:  map[string]core.Manifest{},
 		tools:      map[string]registeredTool{},
 		jobTimeout: cfg.JobTimeout,
 		now:        cfg.Clock.Now,
@@ -130,7 +130,7 @@ func New(cfg Config, reg *capkit.Registry) (*Runtime, error) {
 	rt.jobs = newJobRegistry(cfg.JobWindow, rt.now)
 	threshold := cfg.RequireApprovalAt
 	if threshold == "" {
-		threshold = capkit.RiskHigh
+		threshold = core.RiskHigh
 	}
 	rt.chain = &gates.Chain{
 		Scope: cfg.Scope, Approval: cfg.Approval, Limiter: cfg.Limiter,
@@ -177,8 +177,8 @@ func New(cfg Config, reg *capkit.Registry) (*Runtime, error) {
 }
 
 // Tools returns all registered tool specs.
-func (r *Runtime) Tools() []capkit.ToolSpec {
-	out := make([]capkit.ToolSpec, 0, len(r.tools))
+func (r *Runtime) Tools() []core.ToolSpec {
+	out := make([]core.ToolSpec, 0, len(r.tools))
 	for _, t := range r.tools {
 		out = append(out, t.spec)
 	}
@@ -186,8 +186,8 @@ func (r *Runtime) Tools() []capkit.ToolSpec {
 }
 
 // Manifests returns all capability manifests.
-func (r *Runtime) Manifests() []capkit.Manifest {
-	out := make([]capkit.Manifest, 0, len(r.manifests))
+func (r *Runtime) Manifests() []core.Manifest {
+	out := make([]core.Manifest, 0, len(r.manifests))
 	for _, m := range r.manifests {
 		out = append(out, m)
 	}
@@ -196,11 +196,11 @@ func (r *Runtime) Manifests() []capkit.Manifest {
 
 // Call routes a tool invocation through the mandatory gate chain and completes
 // the result envelope (Status, Summary, Meta, Data clamp) before returning.
-func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, cc capkit.CallContext) (res capkit.Result, err error) {
+func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, cc core.CallContext) (res core.Result, err error) {
 	rt, ok := r.tools[tool]
 	if !ok {
-		e := capkit.NotFound("unknown tool: " + tool)
-		return r.finalize(ctx, capkit.FailResult(e), tool, "", cc, r.now()), e
+		e := core.NotFound("unknown tool: " + tool)
+		return r.finalize(ctx, core.FailResult(e), tool, "", cc, r.now()), e
 	}
 	if tool == jobStatusTool {
 		// Polling is a read of runtime state: no capability, no gate chain.
@@ -208,21 +208,21 @@ func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, 
 	}
 	cap, ok := r.caps[rt.capability]
 	if !ok {
-		e := capkit.NewError(capkit.CodeInternal, "capability not instantiated: "+rt.capability)
-		return r.finalize(ctx, capkit.FailResult(e), tool, rt.version, cc, r.now()), e
+		e := core.NewError(core.CodeInternal, "capability not instantiated: "+rt.capability)
+		return r.finalize(ctx, core.FailResult(e), tool, rt.version, cc, r.now()), e
 	}
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
 	ctx = withRequestCounter(ctx)
 	key := idempotencyKey(tool, cc, input)
-	ctx = capkit.WithCallContext(ctx, cc)
+	ctx = core.WithCallContext(ctx, cc)
 	started := r.now()
-	ctx, finish, gateErr := r.chain.Before(ctx, rt.capability, rt.spec, capkit.Call{
+	ctx, finish, gateErr := r.chain.Before(ctx, rt.capability, rt.spec, core.Call{
 		Tool: tool, Input: input, Context: cc,
 	})
 	if gateErr != nil {
-		return r.finalize(ctx, capkit.FailResult(gateErr), tool, rt.version, cc, started), gateErr
+		return r.finalize(ctx, core.FailResult(gateErr), tool, rt.version, cc, started), gateErr
 	}
 	if key != "" {
 		if cached, ok := r.idem.get(key); ok {
@@ -241,8 +241,8 @@ func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, 
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = capkit.NewError(capkit.CodeInternal, fmt.Sprintf("capability panic: %v", rec))
-			res = capkit.FailResult(err)
+			err = core.NewError(core.CodeInternal, fmt.Sprintf("capability panic: %v", rec))
+			res = core.FailResult(err)
 		}
 		res = r.finalize(ctx, res, tool, rt.version, cc, started)
 		if key != "" && cacheable(res) {
@@ -250,9 +250,9 @@ func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, 
 		}
 		finish(res, err)
 	}()
-	res, err = cap.Call(ctx, capkit.Call{Tool: tool, Input: input, Context: cc})
+	res, err = cap.Call(ctx, core.Call{Tool: tool, Input: input, Context: cc})
 	if err != nil {
-		res = capkit.FailResult(err)
+		res = core.FailResult(err)
 	}
 	return res, err
 }
@@ -260,21 +260,21 @@ func (r *Runtime) Call(ctx context.Context, tool string, input json.RawMessage, 
 // finalize completes the envelope invariants the runtime owns: a valid Status,
 // a non-empty clamped Summary, Meta (tool/version/duration/gate trace/target),
 // and the 8KB Data ceiling.
-func (r *Runtime) finalize(ctx context.Context, res capkit.Result, tool, version string, cc capkit.CallContext, started time.Time) capkit.Result {
+func (r *Runtime) finalize(ctx context.Context, res core.Result, tool, version string, cc core.CallContext, started time.Time) core.Result {
 	if !res.Status.Valid() {
 		if res.Error != nil {
-			res.Status = capkit.StatusForError(res.Error)
+			res.Status = core.StatusForError(res.Error)
 		} else if res.OK {
-			res.Status = capkit.StatusSuccess
+			res.Status = core.StatusSuccess
 		} else {
-			res.Status = capkit.StatusFailed
+			res.Status = core.StatusFailed
 		}
 	}
-	res.OK = res.Status == capkit.StatusSuccess || res.Status == capkit.StatusPartial
+	res.OK = res.Status == core.StatusSuccess || res.Status == core.StatusPartial
 	if res.Summary == "" {
 		res.Summary = summarize(res)
 	}
-	res.Summary = capkit.ClampSummary(res.Summary)
+	res.Summary = core.ClampSummary(res.Summary)
 	if res.Meta.Tool == "" {
 		res.Meta.Tool = tool
 	}
@@ -304,7 +304,7 @@ func (r *Runtime) finalize(ctx context.Context, res capkit.Result, tool, version
 
 // summarize derives a short Summary from a result that did not set one, so
 // every real return carries a readable line for the agent.
-func summarize(res capkit.Result) string {
+func summarize(res core.Result) string {
 	if res.Error != nil && res.Error.Message != "" {
 		return res.Error.Message
 	}
@@ -312,15 +312,15 @@ func summarize(res capkit.Result) string {
 		return res.Text
 	}
 	switch res.Status {
-	case capkit.StatusSuccess:
+	case core.StatusSuccess:
 		return "完成"
-	case capkit.StatusPartial:
+	case core.StatusPartial:
 		return "部分完成"
-	case capkit.StatusBlocked:
+	case core.StatusBlocked:
 		return "被门禁拦截"
-	case capkit.StatusNeedHuman:
+	case core.StatusNeedHuman:
 		return "需人工确认"
-	case capkit.StatusUnavailable:
+	case core.StatusUnavailable:
 		return "依赖不可用"
 	default:
 		return "失败"
@@ -330,9 +330,9 @@ func summarize(res capkit.Result) string {
 // cacheable reports whether a finished result may be reused for a repeated
 // idempotency key. Gate-blocked and human-gated results are not cached so the
 // agent's changed authorization or confirmation is honored.
-func cacheable(res capkit.Result) bool {
+func cacheable(res core.Result) bool {
 	switch res.Status {
-	case capkit.StatusBlocked, capkit.StatusNeedHuman, capkit.StatusUnavailable:
+	case core.StatusBlocked, core.StatusNeedHuman, core.StatusUnavailable:
 		return false
 	}
 	return true

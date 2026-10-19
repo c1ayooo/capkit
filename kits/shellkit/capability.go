@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Capability exposes foothold management and session operations as tools.
-// Everything routes through capkit.SessionManager, so a WebShell, SSH or WinRM
+// Everything routes through core.SessionManager, so a WebShell, SSH or WinRM
 // session is used identically.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 	// deployer is the host boundary for webshell_deploy. It is optional: a host
 	// that only drives existing sessions leaves it nil, and the tool reports
 	// tool_missing rather than pretending to have a delivery channel.
@@ -26,24 +26,24 @@ type Capability struct {
 }
 
 // NewCapability builds the session capability.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // NewCapabilityWithDeployer builds the session capability with a host-supplied
 // delivery channel, which is what enables webshell_deploy. The deployer cannot
-// ride in capkit.Deps because it is shellkit-specific (the same reason
+// ride in core.Deps because it is shellkit-specific (the same reason
 // enterprisekit takes its resolver separately).
-func NewCapabilityWithDeployer(deps capkit.Deps, deployer WebShellDeployer) (capkit.Capability, error) {
+func NewCapabilityWithDeployer(deps core.Deps, deployer WebShellDeployer) (core.Capability, error) {
 	return &Capability{deps: deps, deployer: deployer}, nil
 }
 
 // Manifest declares the session and delivery tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "shellkit", Version: "0.3.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "sessions"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			sessionOpenSpec(), sessionExecSpec(), sessionUploadSpec(),
 			sessionDownloadSpec(), tunnelOpenSpec(), sessionListSpec(), sessionCloseSpec(),
 			webshellDeploySpec(),
@@ -51,11 +51,11 @@ func Manifest() capkit.Manifest {
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the session tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "session_open":
 		return c.open(ctx, call)
@@ -74,25 +74,25 @@ func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result,
 	case "webshell_deploy":
 		return c.deploy(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) manager() (capkit.SessionManager, *capkit.Error) {
+func (c *Capability) manager() (core.SessionManager, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	return c.deps.Sessions, nil
 }
 
 // --- tool specs ---
 
-func sessionOpenSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionOpenSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "session_open",
 		Description: "打开一个后渗透会话（ssh/winrm/smb/cli/webshell）。kind 决定使用哪个 SessionOpener，secret 为密码或私钥，webshell 的 shell 参数放 options。成功返回 session_id，供 session_exec 等工具复用。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -114,7 +114,7 @@ func sessionOpenSpec() capkit.ToolSpec {
   "type":"object",
   "properties":{"session_id":{"type":"string"},"kind":{"type":"string"},"host":{"type":"string"},"user":{"type":"string"},"os":{"type":"string"},"elevated":{"type":"boolean"}}
 }`),
-		ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+		ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 			var in struct {
 				Host string `json:"host"`
 			}
@@ -124,17 +124,17 @@ func sessionOpenSpec() capkit.ToolSpec {
 			if strings.TrimSpace(in.Host) == "" {
 				return nil, fmt.Errorf("host 必填")
 			}
-			return capkit.TargetsFromStrings(0, []string{in.Host})
+			return core.TargetsFromStrings(0, []string{in.Host})
 		},
 	}
 }
 
-func sessionExecSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionExecSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "session_exec",
 		Description: "在一个已打开的会话里执行单条命令并回显。返回 stdout/stderr/exit_code，原始交换作为证据记录。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -153,12 +153,12 @@ func sessionExecSpec() capkit.ToolSpec {
 	}
 }
 
-func sessionUploadSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionUploadSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "session_upload",
 		Description: "把内容（base64 或文本）写入会话对端文件。仅在会话实现 Uploader 时可用，否则报 tool_missing。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -173,12 +173,12 @@ func sessionUploadSpec() capkit.ToolSpec {
 	}
 }
 
-func sessionDownloadSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionDownloadSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "session_download",
 		Description: "读取会话对端文件。文件内容进证据库并以 EvidenceRef 返回（含 size/sha256/≤200 字 preview），Data 只带引用与哈希，不内联正文；仅在会话实现 Downloader 时可用。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -192,12 +192,12 @@ func sessionDownloadSpec() capkit.ToolSpec {
 	}
 }
 
-func tunnelOpenSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func tunnelOpenSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "tunnel_open",
 		Description: "通过会话打开一条隧道（当前支持 remote 直连语义）。返回本地地址供后续使用。仅在会话实现 Tunneler 时可用。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -212,21 +212,21 @@ func tunnelOpenSpec() capkit.ToolSpec {
 	}
 }
 
-func sessionListSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionListSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:         "session_list",
 		Description:  "列出当前所有存活会话的元信息。只读。",
-		Risk:         capkit.RiskLow,
+		Risk:         core.RiskLow,
 		InputSchema:  json.RawMessage(`{"type":"object","properties":{}}`),
 		OutputSchema: json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"},"sessions":{"type":"array","items":{"type":"object"}}}}`),
 	}
 }
 
-func sessionCloseSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func sessionCloseSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:         "session_close",
 		Description:  "关闭并释放一个会话。幂等：关闭不存在的 id 也返回成功。",
-		Risk:         capkit.RiskLow,
+		Risk:         core.RiskLow,
 		InputSchema:  json.RawMessage(`{"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"]}`),
 		OutputSchema: json.RawMessage(`{"type":"object","properties":{"session_id":{"type":"string"},"closed":{"type":"boolean"}}}`),
 	}
@@ -234,10 +234,10 @@ func sessionCloseSpec() capkit.ToolSpec {
 
 // --- handlers ---
 
-func (c *Capability) open(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) open(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		Kind      string            `json:"kind"`
@@ -253,9 +253,9 @@ func (c *Capability) open(ctx context.Context, call capkit.Call) (capkit.Result,
 		Options   map[string]string `json:"options"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
-	spec := capkit.SessionSpec{
+	spec := core.SessionSpec{
 		Kind: in.Kind, Host: in.Host, Port: in.Port, User: in.User, Secret: in.Secret,
 		Domain: in.Domain, Protocol: in.Protocol, ProxyURL: in.Proxy,
 		Timeout: time.Duration(in.TimeoutMS) * time.Millisecond,
@@ -263,9 +263,9 @@ func (c *Capability) open(ctx context.Context, call capkit.Call) (capkit.Result,
 	}
 	info, err := mgr.Open(ctx, spec)
 	if err != nil {
-		return capkit.FailResult(capkit.TargetUnreachable(err.Error())), nil
+		return core.FailResult(core.TargetUnreachable(err.Error())), nil
 	}
-	res, _ := capkit.SuccessResult(
+	res, _ := core.SuccessResult(
 		fmt.Sprintf("已打开 %s 会话 %s（%s）", info.Kind, info.ID, info.Host),
 		map[string]any{
 			"session_id": info.ID, "kind": info.Kind, "host": info.Host,
@@ -275,10 +275,10 @@ func (c *Capability) open(ctx context.Context, call capkit.Call) (capkit.Result,
 	return res, nil
 }
 
-func (c *Capability) exec(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) exec(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID string `json:"session_id"`
@@ -288,28 +288,28 @@ func (c *Capability) exec(ctx context.Context, call capkit.Call) (capkit.Result,
 		MaxOutput int    `json:"max_output"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
-	out, err := s.Exec(ctx, in.Command, capkit.ExecOpts{
+	out, err := s.Exec(ctx, in.Command, core.ExecOpts{
 		Timeout: time.Duration(in.TimeoutMS) * time.Millisecond,
-		Dir:     in.Dir, MaxOutput: capkit.FirstPositive(in.MaxOutput, 64<<10),
+		Dir:     in.Dir, MaxOutput: core.FirstPositive(in.MaxOutput, 64<<10),
 	})
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	data, _ := capkit.DataResult(out)
-	data.Summary = capkit.ClampSummary(fmt.Sprintf("会话 %s 执行完毕（exit %d，%d 字节）", in.SessionID, out.ExitCode, len(out.Stdout)))
+	data, _ := core.DataResult(out)
+	data.Summary = core.ClampSummary(fmt.Sprintf("会话 %s 执行完毕（exit %d，%d 字节）", in.SessionID, out.ExitCode, len(out.Stdout)))
 	if out.EvidenceID != "" {
 		// The transport stored the traffic itself and handed back its id.
-		data.Evidence = []capkit.EvidenceRef{{ID: out.EvidenceID, Kind: "command_output", Size: len(out.Stdout)}}
+		data.Evidence = []core.EvidenceRef{{ID: out.EvidenceID, Kind: "command_output", Size: len(out.Stdout)}}
 	} else if ref := c.recordOutput(ctx, "session_exec", in.SessionID, out.Stdout, out.Stderr); ref.Size > 0 {
 		// The transport has no store of its own, so the tool stores the output:
 		// Data keeps the clamped view and the ref points at the full text.
-		data.Evidence = []capkit.EvidenceRef{ref}
+		data.Evidence = []core.EvidenceRef{ref}
 	}
 	return data, nil
 }
@@ -318,23 +318,23 @@ func (c *Capability) exec(ctx context.Context, call capkit.Call) (capkit.Result,
 // evidence sink is injected. The reference always carries size/sha256/preview;
 // its ID is empty when there is no sink, so the caller can tell "stored" from
 // "known but not persisted".
-func (c *Capability) recordOutput(ctx context.Context, tool, sessionID string, stdout, stderr string) capkit.EvidenceRef {
+func (c *Capability) recordOutput(ctx context.Context, tool, sessionID string, stdout, stderr string) core.EvidenceRef {
 	body := stdout
 	if stderr != "" {
 		body += "\n--- stderr ---\n" + stderr
 	}
 	if body == "" {
-		return capkit.EvidenceRef{}
+		return core.EvidenceRef{}
 	}
 	sum := sha256.Sum256([]byte(body))
-	ref := capkit.EvidenceRef{
+	ref := core.EvidenceRef{
 		Kind: "command_output", Size: len(body),
-		SHA256: hex.EncodeToString(sum[:]), Preview: capkit.PreviewRunes(body, 200),
+		SHA256: hex.EncodeToString(sum[:]), Preview: core.PreviewRunes(body, 200),
 	}
 	if c.deps.Evidence == nil {
 		return ref
 	}
-	id, err := c.deps.Evidence.Record(ctx, capkit.Evidence{
+	id, err := c.deps.Evidence.Record(ctx, core.Evidence{
 		Kind: "command_output", Title: tool + " " + sessionID,
 		Response: []byte(body), CreatedAt: time.Now(),
 		Metadata: map[string]string{"tool": tool, "session_id": sessionID},
@@ -345,10 +345,10 @@ func (c *Capability) recordOutput(ctx context.Context, tool, sessionID string, s
 	return ref
 }
 
-func (c *Capability) upload(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) upload(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID     string `json:"session_id"`
@@ -357,37 +357,37 @@ func (c *Capability) upload(ctx context.Context, call capkit.Call) (capkit.Resul
 		Content       string `json:"content"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
-	up, ok := s.(capkit.Uploader)
+	up, ok := s.(core.Uploader)
 	if !ok {
-		return capkit.FailResult(capkit.ToolMissing("该会话不支持 Upload")), nil
+		return core.FailResult(core.ToolMissing("该会话不支持 Upload")), nil
 	}
 	data := []byte(in.Content)
 	if in.ContentBase64 != "" {
 		decoded, err := base64.StdEncoding.DecodeString(in.ContentBase64)
 		if err != nil {
-			return capkit.FailResult(capkit.InvalidInput("content_base64 解码失败: " + err.Error())), nil
+			return core.FailResult(core.InvalidInput("content_base64 解码失败: " + err.Error())), nil
 		}
 		data = decoded
 	}
 	if err := up.Upload(ctx, strings.NewReader(string(data)), in.Remote); err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("已写入 %s（%d 字节）", in.Remote, len(data)), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("已写入 %s（%d 字节）", in.Remote, len(data)), map[string]any{
 		"remote": in.Remote, "bytes": len(data), "ok": true,
 	})
 	return res, nil
 }
 
-func (c *Capability) download(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) download(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID string `json:"session_id"`
@@ -395,25 +395,25 @@ func (c *Capability) download(ctx context.Context, call capkit.Call) (capkit.Res
 		MaxBytes  int    `json:"max_bytes"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
-	dl, ok := s.(capkit.Downloader)
+	dl, ok := s.(core.Downloader)
 	if !ok {
-		return capkit.FailResult(capkit.ToolMissing("该会话不支持 Download")), nil
+		return core.FailResult(core.ToolMissing("该会话不支持 Download")), nil
 	}
 	rc, err := dl.Download(ctx, in.Remote)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
 	defer func() { _ = rc.Close() }()
-	limit := capkit.FirstPositive(in.MaxBytes, 6144)
+	limit := core.FirstPositive(in.MaxBytes, 6144)
 	buf, err := io.ReadAll(io.LimitReader(rc, int64(limit)+1))
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
 	truncated := len(buf) > limit
 	if truncated {
@@ -425,12 +425,12 @@ func (c *Capability) download(ctx context.Context, call capkit.Call) (capkit.Res
 	// and Data carries only the reference plus hashes. Without a sink the ref
 	// has no id, so the caller still knows exactly what was read but the bytes
 	// stay out of the envelope.
-	ref := capkit.EvidenceRef{
+	ref := core.EvidenceRef{
 		Kind: "file", Size: len(buf), SHA256: sumHex,
-		Preview: capkit.PreviewRunes(string(buf), 200),
+		Preview: core.PreviewRunes(string(buf), 200),
 	}
 	if c.deps.Evidence != nil {
-		if id, rerr := c.deps.Evidence.Record(ctx, capkit.Evidence{
+		if id, rerr := c.deps.Evidence.Record(ctx, core.Evidence{
 			Kind: "file", Title: "session_download " + in.Remote,
 			Response: buf, CreatedAt: time.Now(),
 			Metadata: map[string]string{"remote": in.Remote, "sha256": sumHex},
@@ -438,19 +438,19 @@ func (c *Capability) download(ctx context.Context, call capkit.Call) (capkit.Res
 			ref.ID = id
 		}
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("读取 %s（%d 字节%s）", in.Remote, len(buf), truncLabel(truncated)), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("读取 %s（%d 字节%s）", in.Remote, len(buf), truncLabel(truncated)), map[string]any{
 		"remote": in.Remote, "bytes": len(buf), "sha256": sumHex,
 		"evidence_id": ref.ID, "truncated": truncated,
 	})
-	res.Evidence = []capkit.EvidenceRef{ref}
+	res.Evidence = []core.EvidenceRef{ref}
 	res.Truncated = truncated
 	return res, nil
 }
 
-func (c *Capability) tunnel(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) tunnel(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID  string `json:"session_id"`
@@ -459,57 +459,57 @@ func (c *Capability) tunnel(ctx context.Context, call capkit.Call) (capkit.Resul
 		Network    string `json:"network"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
-	t, ok := s.(capkit.Tunneler)
+	t, ok := s.(core.Tunneler)
 	if !ok {
-		return capkit.FailResult(capkit.ToolMissing("该会话不支持 Tunnel")), nil
+		return core.FailResult(core.ToolMissing("该会话不支持 Tunnel")), nil
 	}
-	tun, err := t.Tunnel(ctx, capkit.TunnelSpec{Kind: "remote", RemoteAddr: in.RemoteAddr, LocalAddr: in.LocalAddr, Network: in.Network})
+	tun, err := t.Tunnel(ctx, core.TunnelSpec{Kind: "remote", RemoteAddr: in.RemoteAddr, LocalAddr: in.LocalAddr, Network: in.Network})
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
 	local := tun.LocalAddr()
-	res, _ := capkit.SuccessResult(fmt.Sprintf("隧道已建立 %s → %s", local, in.RemoteAddr), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("隧道已建立 %s → %s", local, in.RemoteAddr), map[string]any{
 		"local_addr": local, "remote_addr": in.RemoteAddr,
 	})
 	return res, nil
 }
 
-func (c *Capability) list(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) list(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	infos := mgr.List()
-	res, _ := capkit.SuccessResult(fmt.Sprintf("%d 个存活会话", len(infos)), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("%d 个存活会话", len(infos)), map[string]any{
 		"count": len(infos), "sessions": infos,
 	})
 	return res, nil
 }
 
-func (c *Capability) close(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) close(ctx context.Context, call core.Call) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID string `json:"session_id"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if in.SessionID == "" {
-		return capkit.FailResult(capkit.InvalidInput("session_id 必填")), nil
+		return core.FailResult(core.InvalidInput("session_id 必填")), nil
 	}
 	if err := mgr.Close(in.SessionID); err != nil {
-		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
+		return core.FailResult(core.UpstreamError(err.Error())), nil
 	}
-	res, _ := capkit.SuccessResult("会话已关闭: "+in.SessionID, map[string]any{
+	res, _ := core.SuccessResult("会话已关闭: "+in.SessionID, map[string]any{
 		"session_id": in.SessionID, "closed": true,
 	})
 	return res, nil

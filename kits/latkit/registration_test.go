@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // --- fakes ---------------------------------------------------------------
 
-// fakeRunner is a canned capkit.ProcessRunner. It records the last ProcessSpec
+// fakeRunner is a canned core.ProcessRunner. It records the last ProcessSpec
 // and returns scripted stdout/stderr/exit without spawning anything.
 type fakeRunner struct {
-	spec   capkit.ProcessSpec
+	spec   core.ProcessSpec
 	stdout string
 	stderr string
 	exit   int
@@ -24,38 +24,38 @@ type fakeRunner struct {
 	calls  int
 }
 
-func (f *fakeRunner) Run(_ context.Context, spec capkit.ProcessSpec) (*capkit.ProcessResult, error) {
+func (f *fakeRunner) Run(_ context.Context, spec core.ProcessSpec) (*core.ProcessResult, error) {
 	f.calls++
 	f.spec = spec
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &capkit.ProcessResult{
+	return &core.ProcessResult{
 		ExitCode: f.exit,
 		Stdout:   []byte(f.stdout),
 		Stderr:   []byte(f.stderr),
 	}, nil
 }
 
-func mustCap(t *testing.T, r capkit.ProcessRunner) capkit.Capability {
+func mustCap(t *testing.T, r core.ProcessRunner) core.Capability {
 	t.Helper()
-	c, err := NewCapability(capkit.Deps{Processes: r})
+	c, err := NewCapability(core.Deps{Processes: r})
 	if err != nil {
 		t.Fatalf("NewCapability: %v", err)
 	}
 	return c
 }
 
-func callTool(t *testing.T, c capkit.Capability, tool string, payload map[string]any) capkit.Result {
+func callTool(t *testing.T, c core.Capability, tool string, payload map[string]any) core.Result {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:    tool,
 		Input:   raw,
-		Context: capkit.CallContext{ProjectID: 7, Actor: "tester"},
+		Context: core.CallContext{ProjectID: 7, Actor: "tester"},
 	})
 	if err != nil {
 		t.Fatalf("Call(%s): %v", tool, err)
@@ -160,7 +160,7 @@ func TestEachToolDispatchesToItsBinary(t *testing.T) {
 			fr := &fakeRunner{stdout: "done\n"}
 			c := mustCap(t, fr)
 			res := callTool(t, c, tc.tool, tc.payload)
-			if res.Status != capkit.StatusSuccess {
+			if res.Status != core.StatusSuccess {
 				t.Fatalf("status = %q, error = %+v", res.Status, res.Error)
 			}
 			if fr.calls != 1 {
@@ -256,7 +256,7 @@ func TestKerberoastPopulatesFindingsAndNext(t *testing.T) {
 	res := callTool(t, c, "lat_kerberoast", map[string]any{
 		"target": "dc01.corp", "domain": "CORP", "user": "alice", "secret": "Passw0rd",
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	if len(res.Findings) != 1 {
@@ -308,7 +308,7 @@ func TestRoastWithoutHashesReportsCompletion(t *testing.T) {
 	if len(res.Findings) != 0 {
 		t.Fatalf("findings = %+v, want none", res.Findings)
 	}
-	if res.Status != capkit.StatusSuccess || !strings.Contains(res.Summary, "未解析到") {
+	if res.Status != core.StatusSuccess || !strings.Contains(res.Summary, "未解析到") {
 		t.Fatalf("status/summary = %q/%q", res.Status, res.Summary)
 	}
 }
@@ -337,10 +337,10 @@ func TestMissingRunnerIsUnavailable(t *testing.T) {
 	res := callTool(t, c, "lat_psexec", map[string]any{
 		"target": "10.0.0.5", "user": "alice", "secret": "Passw0rd", "command": "whoami",
 	})
-	if res.Status != capkit.StatusUnavailable {
+	if res.Status != core.StatusUnavailable {
 		t.Fatalf("status = %q, want unavailable", res.Status)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+	if res.Error == nil || res.Error.Code != core.CodeUnavailable {
 		t.Fatalf("error = %+v, want unavailable", res.Error)
 	}
 }
@@ -348,7 +348,7 @@ func TestMissingRunnerIsUnavailable(t *testing.T) {
 func TestUnknownToolIsNotFound(t *testing.T) {
 	c := mustCap(t, &fakeRunner{})
 	res := callTool(t, c, "lat_nope", map[string]any{"target": "10.0.0.5"})
-	if res.Status == capkit.StatusSuccess || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status == core.StatusSuccess || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
 }
@@ -357,23 +357,23 @@ func TestInvalidInputIsRejected(t *testing.T) {
 	c := mustCap(t, &fakeRunner{})
 	// missing target (and user/secret)
 	res := callTool(t, c, "lat_psexec", map[string]any{"command": "whoami"})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("res = %+v", res)
 	}
 	// malformed hash
 	res = callTool(t, c, "lat_pass_the_hash", map[string]any{
 		"target": "10.0.0.5", "user": "alice", "hash": "not-a-hash",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("res = %+v", res)
 	}
 	// malformed JSON payload
-	raw := capkit.Call{Tool: "lat_psexec", Input: json.RawMessage(`{"target":`)}
+	raw := core.Call{Tool: "lat_psexec", Input: json.RawMessage(`{"target":`)}
 	out, err := c.Call(context.Background(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Error == nil || out.Error.Code != capkit.CodeInvalidInput {
+	if out.Error == nil || out.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("malformed JSON res = %+v", out)
 	}
 }
@@ -384,7 +384,7 @@ func TestCommandWithShellMetacharsIsRejected(t *testing.T) {
 		"target": "10.0.0.5", "user": "alice", "secret": "Passw0rd",
 		"command": "whoami; rm -rf /",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("metachar command must be rejected: %+v", res)
 	}
 }
@@ -395,7 +395,7 @@ func TestRunnerErrorIsUpstreamError(t *testing.T) {
 	res := callTool(t, c, "lat_wmiexec", map[string]any{
 		"target": "10.0.0.5", "user": "alice", "secret": "Passw0rd", "command": "whoami",
 	})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeUpstreamError {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeUpstreamError {
 		t.Fatalf("res = %+v", res)
 	}
 }
@@ -562,7 +562,7 @@ func TestParseHashesFormats(t *testing.T) {
 
 func TestTargetFromInput(t *testing.T) {
 	ts, err := targetFromInput(json.RawMessage(`{"target":"10.0.0.5"}`))
-	if err != nil || len(ts) != 1 || ts[0].Kind != capkit.TargetIP {
+	if err != nil || len(ts) != 1 || ts[0].Kind != core.TargetIP {
 		t.Fatalf("targets = %+v (%v)", ts, err)
 	}
 	if _, err := targetFromInput(json.RawMessage(`{}`)); err == nil {

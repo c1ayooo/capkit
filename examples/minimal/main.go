@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/sealer"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/runtime"
 )
@@ -25,7 +25,7 @@ func main() {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		log.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{
 		ProjectID: 1, Actor: "example",
 	})
 	if err != nil {

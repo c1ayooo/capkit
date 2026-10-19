@@ -8,12 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/sealer"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/runtime"
 	"github.com/c1ayooo/capkit/runtime/httpapi"
@@ -25,7 +25,7 @@ func TestHandlerToolsAndCall(t *testing.T) {
 	}))
 	defer target.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestHandlerToolsAndCall(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	var tools struct {
-		Tools []capkit.ToolSpec `json:"tools"`
+		Tools []core.ToolSpec `json:"tools"`
 	}
 	if err := json.Unmarshal(body, &tools); err != nil {
 		t.Fatal(err)
@@ -76,8 +76,8 @@ func TestHandlerToolsAndCall(t *testing.T) {
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	var out struct {
-		Result capkit.Result `json:"result"`
-		Error  string        `json:"error"`
+		Result core.Result `json:"result"`
+		Error  string      `json:"error"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		t.Fatal(err)

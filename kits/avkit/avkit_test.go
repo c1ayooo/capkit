@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeSession struct {
 	os    string
-	out   map[string]capkit.Output
+	out   map[string]core.Output
 	calls []string
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	f.calls = append(f.calls, cmd)
 	for k, v := range f.out {
 		if strings.Contains(cmd, k) {
@@ -23,40 +23,40 @@ func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (ca
 			return v, nil
 		}
 	}
-	return capkit.Output{Command: cmd}, nil
+	return core.Output{Command: cmd}, nil
 }
-func (f *fakeSession) Info() capkit.SessionInfo {
-	return capkit.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.9"}
+func (f *fakeSession) Info() core.SessionInfo {
+	return core.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.9"}
 }
 func (f *fakeSession) Close() error { return nil }
 
-type fakeManager struct{ sess capkit.Session }
+type fakeManager struct{ sess core.Session }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, nil
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, nil
 }
-func (m *fakeManager) Get(string) (capkit.Session, bool) {
+func (m *fakeManager) Get(string) (core.Session, bool) {
 	if m.sess == nil {
 		return nil, false
 	}
 	return m.sess, true
 }
-func (m *fakeManager) List() []capkit.SessionInfo { return nil }
-func (m *fakeManager) Close(string) error         { return nil }
+func (m *fakeManager) List() []core.SessionInfo { return nil }
+func (m *fakeManager) Close(string) error       { return nil }
 
-func newCap(t *testing.T, s capkit.Session) *Capability {
+func newCap(t *testing.T, s core.Session) *Capability {
 	t.Helper()
-	c, err := NewCapability(capkit.Deps{Sessions: &fakeManager{sess: s}})
+	c, err := NewCapability(core.Deps{Sessions: &fakeManager{sess: s}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c.(*Capability)
 }
 
-func call(t *testing.T, c *Capability, tool string, in any) capkit.Result {
+func call(t *testing.T, c *Capability, tool string, in any) core.Result {
 	t.Helper()
 	raw, _ := json.Marshal(in)
-	res, err := c.Call(context.Background(), capkit.Call{Tool: tool, Input: raw})
+	res, err := c.Call(context.Background(), core.Call{Tool: tool, Input: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +108,14 @@ func TestDatabaseWellFormed(t *testing.T) {
 }
 
 func TestDetectWindowsDefender(t *testing.T) {
-	sess := &fakeSession{os: "windows", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "windows", out: map[string]core.Output{
 		"tasklist":    {Stdout: "MsMpEng.exe,1234,Console,1,100 K\n"},
 		"sc query":    {Stdout: "SERVICE_NAME: WinDefend\nSERVICE_NAME: Sysmon64\n"},
 		"driverquery": {Stdout: "WdFilter.sys\n"},
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "av_detect", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	var data struct {
@@ -145,14 +145,14 @@ func TestDetectWindowsDefender(t *testing.T) {
 }
 
 func TestDetectLinuxFalco(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{
 		"ps -eo comm=": {Stdout: "falco\nsystemd\n"},
 		"lsmod":        {Stdout: "falco 1234 0\n"},
 		"dpkg -l":      {Stdout: "ii falco 0.37.1\n"},
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "av_detect", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s", res.Status)
 	}
 	var data struct {
@@ -174,7 +174,7 @@ func TestDetectLinuxFalco(t *testing.T) {
 }
 
 func TestDetectCategoryFilter(t *testing.T) {
-	sess := &fakeSession{os: "windows", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "windows", out: map[string]core.Output{
 		"tasklist":    {Stdout: "MsMpEng.exe\nSysmon64.exe\n"},
 		"sc query":    {Stdout: "SERVICE_NAME: Sysmon64\n"},
 		"driverquery": {Stdout: "SysmonDrv.sys\n"},
@@ -193,12 +193,12 @@ func TestDetectCategoryFilter(t *testing.T) {
 }
 
 func TestDetectNoMatches(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{
 		"ps -eo comm=": {Stdout: "nginx\nsshd\n"},
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "av_detect", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s", res.Status)
 	}
 	var data struct {
@@ -214,17 +214,17 @@ func TestDetectNoMatches(t *testing.T) {
 }
 
 func TestDetectMissingManager(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{})
-	res, _ := c.(*Capability).Call(context.Background(), capkit.Call{Tool: "av_detect", Input: json.RawMessage(`{"session_id":"x"}`)})
-	if res.Status != capkit.StatusUnavailable || res.Error.Code != capkit.CodeToolMissing {
+	c, _ := NewCapability(core.Deps{})
+	res, _ := c.(*Capability).Call(context.Background(), core.Call{Tool: "av_detect", Input: json.RawMessage(`{"session_id":"x"}`)})
+	if res.Status != core.StatusUnavailable || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 }
 
 func TestDetectSessionNotFound(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{Sessions: &fakeManager{}})
-	res, _ := c.(*Capability).Call(context.Background(), capkit.Call{Tool: "av_detect", Input: json.RawMessage(`{"session_id":"missing"}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	c, _ := NewCapability(core.Deps{Sessions: &fakeManager{}})
+	res, _ := c.(*Capability).Call(context.Background(), core.Call{Tool: "av_detect", Input: json.RawMessage(`{"session_id":"missing"}`)})
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("%+v", res.Error)
 	}
 }
@@ -232,7 +232,7 @@ func TestDetectSessionNotFound(t *testing.T) {
 func TestUnknownTool(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "av_bogus", map[string]any{})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("%+v", res.Error)
 	}
 }
@@ -240,7 +240,7 @@ func TestUnknownTool(t *testing.T) {
 func TestListAll(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "av_list", map[string]any{})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s", res.Status)
 	}
 	var data struct {
@@ -279,7 +279,7 @@ func TestListCategoryFilterDoesNotMutateDB(t *testing.T) {
 }
 
 func TestDetectPlatformProbe(t *testing.T) {
-	sess := &fakeSession{os: "", out: map[string]capkit.Output{"uname -s": {Stdout: "Linux\n"}}}
+	sess := &fakeSession{os: "", out: map[string]core.Output{"uname -s": {Stdout: "Linux\n"}}}
 	c := newCap(t, sess)
 	if got := detectPlatform(context.Background(), c, sess, 0); got != "linux" {
 		t.Fatalf("got %q", got)

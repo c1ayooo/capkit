@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/reconkit"
 )
@@ -18,9 +18,9 @@ type errorSink struct{}
 
 func (errorSink) Emit(context.Context, reconkit.Asset) error { return errors.New("sink down") }
 
-func reconCapability(t *testing.T, p *reconkit.Pipeline) capkit.Capability {
+func reconCapability(t *testing.T, p *reconkit.Pipeline) core.Capability {
 	t.Helper()
-	c, err := reconkit.NewCapability(capkit.Deps{})
+	c, err := reconkit.NewCapability(core.Deps{})
 	if err != nil {
 		t.Fatalf("NewCapability: %v", err)
 	}
@@ -33,13 +33,13 @@ func reconCapability(t *testing.T, p *reconkit.Pipeline) capkit.Capability {
 // TestReconEnvelopeUnwired covers the failure path: a capability built without a
 // wired pipeline must return a ToolMissing envelope, not a bare result.
 func TestReconEnvelopeUnwired(t *testing.T) {
-	res, err := reconCapability(t, nil).Call(context.Background(), capkit.Call{
+	res, err := reconCapability(t, nil).Call(context.Background(), core.Call{
 		Tool: "recon_run", Input: []byte(`{"domains":["example.com"],"enable_subdomain":true}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("status=%q err=%+v", res.Status, res.Error)
 	}
 	if res.Meta.Tool != "recon_run" || res.Meta.Version != "0.2.0" {
@@ -58,14 +58,14 @@ func TestReconEnvelopeSuccess(t *testing.T) {
 		Subs: fakeSubs{}, HTTP: fakeHTTP{}, Sink: sink,
 		Scope: gates.StaticScope("example.com"), Limiter: gates.NewLimiter(),
 	}
-	res, err := reconCapability(t, p).Call(context.Background(), capkit.Call{
+	res, err := reconCapability(t, p).Call(context.Background(), core.Call{
 		Tool:  "recon_run",
 		Input: []byte(`{"domains":["example.com"],"enable_subdomain":true,"enable_http":true}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess || !res.OK {
+	if res.Status != core.StatusSuccess || !res.OK {
 		t.Fatalf("status=%q ok=%v summary=%q", res.Status, res.OK, res.Summary)
 	}
 	if res.Meta.Tool != "recon_run" || res.Meta.Version != "0.2.0" {
@@ -75,7 +75,7 @@ func TestReconEnvelopeSuccess(t *testing.T) {
 		!strings.Contains(res.Summary, "子域 2") || !strings.Contains(res.Summary, "资产 6 条") {
 		t.Fatalf("summary = %q", res.Summary)
 	}
-	if len([]rune(res.Summary)) > capkit.MaxSummaryRunes {
+	if len([]rune(res.Summary)) > core.MaxSummaryRunes {
 		t.Fatalf("summary too long: %d", len([]rune(res.Summary)))
 	}
 	var v any
@@ -94,26 +94,26 @@ func TestReconEnvelopePartial(t *testing.T) {
 		Subs: fakeSubs{}, Sink: errorSink{},
 		Scope: gates.StaticScope("example.com"), Limiter: gates.NewLimiter(),
 	}
-	res, err := reconCapability(t, p).Call(context.Background(), capkit.Call{
+	res, err := reconCapability(t, p).Call(context.Background(), core.Call{
 		Tool: "recon_run", Input: []byte(`{"domains":["example.com"],"enable_subdomain":true}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusPartial || !res.OK {
+	if res.Status != core.StatusPartial || !res.OK {
 		t.Fatalf("status=%q ok=%v summary=%q", res.Status, res.OK, res.Summary)
 	}
 	if !strings.Contains(res.Summary, "个错误") {
 		t.Fatalf("partial summary = %q", res.Summary)
 	}
 
-	res, err = reconCapability(t, p).Call(context.Background(), capkit.Call{
+	res, err = reconCapability(t, p).Call(context.Background(), core.Call{
 		Tool: "recon_run", Input: []byte(`{"domains":[]}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("invalid input = %q %+v", res.Status, res.Error)
 	}
 	if res.Meta.Tool != "recon_run" {
@@ -123,11 +123,11 @@ func TestReconEnvelopePartial(t *testing.T) {
 
 // TestReconUnknownTool pins the not-found envelope for an unregistered tool.
 func TestReconUnknownTool(t *testing.T) {
-	res, err := reconCapability(t, nil).Call(context.Background(), capkit.Call{Tool: "nope"})
+	res, err := reconCapability(t, nil).Call(context.Background(), core.Call{Tool: "nope"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %q %+v", res.Status, res.Error)
 	}
 }

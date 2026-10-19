@@ -5,15 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-func loginResponse(body string, setCookies ...string) *capkit.Response {
+func loginResponse(body string, setCookies ...string) *core.Response {
 	h := map[string][]string{}
 	if len(setCookies) > 0 {
 		h["Set-Cookie"] = setCookies
 	}
-	return &capkit.Response{Status: 200, Body: []byte(body), Headers: h}
+	return &core.Response{Status: 200, Body: []byte(body), Headers: h}
 }
 
 func newFn(t *testing.T, ff *stubFetcher) *fengniaoProvider {

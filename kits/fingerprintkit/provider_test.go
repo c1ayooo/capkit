@@ -4,22 +4,22 @@ import (
 	"context"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeHTTP struct {
-	resp    *capkit.Response
+	resp    *core.Response
 	lastURL string
 }
 
-func (f *fakeHTTP) Do(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f *fakeHTTP) Do(_ context.Context, req core.Request) (*core.Response, error) {
 	f.lastURL = req.URL
 	return f.resp, nil
 }
 
 type fakeEvidence struct{ n int }
 
-func (f *fakeEvidence) Record(context.Context, capkit.Evidence) (string, error) {
+func (f *fakeEvidence) Record(context.Context, core.Evidence) (string, error) {
 	f.n++
 	return "ev-1", nil
 }
@@ -32,13 +32,13 @@ func TestProviderFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	http := &fakeHTTP{resp: &capkit.Response{
+	http := &fakeHTTP{resp: &core.Response{
 		Status: 200, Headers: map[string][]string{"Server": {"nginx/1.25"}}, Body: []byte("ok"),
 	}}
 	ev := &fakeEvidence{}
 	p := &Provider{HTTP: http, Rules: rs, Evidence: ev}
-	techs, err := p.Fingerprint(context.Background(), capkit.Target{
-		Kind: capkit.TargetURL, URL: "http://127.0.0.1/",
+	techs, err := p.Fingerprint(context.Background(), core.Target{
+		Kind: core.TargetURL, URL: "http://127.0.0.1/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,10 +53,10 @@ func TestProviderFingerprint(t *testing.T) {
 
 func TestProviderHostFallback(t *testing.T) {
 	rs, _ := NewRuleSet([]Rule{{Name: "x", Product: "x", Patterns: []Pattern{{Type: "body", Value: "x"}}}})
-	http := &fakeHTTP{resp: &capkit.Response{Status: 200, Body: []byte("x")}}
+	http := &fakeHTTP{resp: &core.Response{Status: 200, Body: []byte("x")}}
 	p := &Provider{HTTP: http, Rules: rs}
-	_, err := p.Fingerprint(context.Background(), capkit.Target{
-		Kind: capkit.TargetHost, Host: "127.0.0.1", Port: 8080,
+	_, err := p.Fingerprint(context.Background(), core.Target{
+		Kind: core.TargetHost, Host: "127.0.0.1", Port: 8080,
 	})
 	if err != nil {
 		t.Fatal(err)

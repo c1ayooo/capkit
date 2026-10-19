@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Catalog is an in-memory, engine-neutral template index. It does not execute
@@ -74,18 +74,18 @@ func (c *Catalog) Reload(ctx context.Context, sources ...PackSource) error {
 	return nil
 }
 
-func (c *Catalog) Get(_ context.Context, id string) (capkit.TemplateRef, bool, error) {
+func (c *Catalog) Get(_ context.Context, id string) (core.TemplateRef, bool, error) {
 	c.mu.RLock()
 	t, ok := c.byID[id]
 	c.mu.RUnlock()
 	if !ok {
-		return capkit.TemplateRef{}, false, nil
+		return core.TemplateRef{}, false, nil
 	}
 	ref, err := t.Ref()
 	return ref, err == nil, err
 }
 
-func (c *Catalog) Search(_ context.Context, q capkit.TemplateQuery) ([]capkit.TemplateRef, error) {
+func (c *Catalog) Search(_ context.Context, q core.TemplateQuery) ([]core.TemplateRef, error) {
 	c.mu.RLock()
 	all := make([]Template, 0, len(c.byID))
 	for _, t := range c.byID {
@@ -98,7 +98,7 @@ func (c *Catalog) Search(_ context.Context, q capkit.TemplateQuery) ([]capkit.Te
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	out := make([]capkit.TemplateRef, 0, limit)
+	out := make([]core.TemplateRef, 0, limit)
 	for _, t := range all {
 		if !matchQuery(t, q) {
 			continue
@@ -132,7 +132,7 @@ func (c *Catalog) PackNames() []string {
 	return out
 }
 
-func matchQuery(t Template, q capkit.TemplateQuery) bool {
+func matchQuery(t Template, q core.TemplateQuery) bool {
 	if q.Kind != "" && !strings.EqualFold(string(t.Kind), q.Kind) {
 		return false
 	}

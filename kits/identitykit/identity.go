@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // ---- CSRF extraction ----
@@ -109,12 +109,12 @@ type JarIdentity struct {
 	mu      sync.Mutex
 	jar     http.CookieJar
 	headers http.Header
-	scope   capkit.IdentityScope
+	scope   core.IdentityScope
 	target  string // base URL the jar was primed against
 }
 
 // NewJarIdentity builds a cookie-jar identity for one target origin.
-func NewJarIdentity(target string, headers http.Header, scope capkit.IdentityScope) (*JarIdentity, error) {
+func NewJarIdentity(target string, headers http.Header, scope core.IdentityScope) (*JarIdentity, error) {
 	u, err := url.Parse(target)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("target 无效: %q", target)
@@ -170,7 +170,7 @@ func (j *JarIdentity) Headers(context.Context) (http.Header, error) {
 func (j *JarIdentity) Refresh(context.Context) error { return nil }
 
 // Scope returns the identity's authorized scope.
-func (j *JarIdentity) Scope() capkit.IdentityScope { return j.scope }
+func (j *JarIdentity) Scope() core.IdentityScope { return j.scope }
 
 // ---- Bearer-token identity ----
 
@@ -179,15 +179,15 @@ type TokenIdentity struct {
 	mu       sync.Mutex
 	token    string
 	kind     string // Bearer | X-Auth-Token | ...
-	snapshot capkit.TokenSnapshot
-	refresh  func(ctx context.Context, current string) (capkit.TokenSnapshot, error)
-	scope    capkit.IdentityScope
+	snapshot core.TokenSnapshot
+	refresh  func(ctx context.Context, current string) (core.TokenSnapshot, error)
+	scope    core.IdentityScope
 	skew     time.Duration
 }
 
 // NewTokenIdentity builds a token identity. refresh may be nil for a static
 // token; when set, Headers() refreshes proactively once the token nears expiry.
-func NewTokenIdentity(kind, token string, snap capkit.TokenSnapshot, refresh func(ctx context.Context, current string) (capkit.TokenSnapshot, error), scope capkit.IdentityScope) *TokenIdentity {
+func NewTokenIdentity(kind, token string, snap core.TokenSnapshot, refresh func(ctx context.Context, current string) (core.TokenSnapshot, error), scope core.IdentityScope) *TokenIdentity {
 	if kind == "" {
 		kind = "Bearer"
 	}
@@ -246,7 +246,7 @@ func (t *TokenIdentity) Refresh(ctx context.Context) error {
 }
 
 // Scope returns the identity's authorized scope.
-func (t *TokenIdentity) Scope() capkit.IdentityScope { return t.scope }
+func (t *TokenIdentity) Scope() core.IdentityScope { return t.scope }
 
 // Token returns the current token value.
 func (t *TokenIdentity) Token() string {
@@ -258,7 +258,7 @@ func (t *TokenIdentity) Token() string {
 // ---- Login flows ----
 
 // FormFlow is a cookie-jar form login (POST username/password + optional CSRF
-// fetched from the login page). It implements capkit.AuthFlow.
+// fetched from the login page). It implements core.AuthFlow.
 type FormFlow struct {
 	LoginURL     string
 	Method       string // default POST
@@ -267,15 +267,15 @@ type FormFlow struct {
 	ExtraFields  map[string]string
 	CSRFRequired bool
 	SuccessCheck func(status int, body string) bool
-	HTTP         capkit.HTTPDoer
-	Scope        capkit.IdentityScope
+	HTTP         core.HTTPDoer
+	Scope        core.IdentityScope
 	Target       string
 }
 
 func (f *FormFlow) Kind() string { return "form" }
 
 // Login performs the form login and returns a cookie-jar identity.
-func (f *FormFlow) Login(ctx context.Context, creds capkit.Credentials) (capkit.Identity, error) {
+func (f *FormFlow) Login(ctx context.Context, creds core.Credentials) (core.Identity, error) {
 	if f.HTTP == nil {
 		return nil, fmt.Errorf("FormFlow 需要 HTTPDoer")
 	}
@@ -284,15 +284,15 @@ func (f *FormFlow) Login(ctx context.Context, creds capkit.Credentials) (capkit.
 		return nil, err
 	}
 	form := url.Values{}
-	form.Set(capkit.FirstNonEmpty(f.UserField, "username"), creds.Username)
-	form.Set(capkit.FirstNonEmpty(f.PassField, "password"), creds.Password)
+	form.Set(core.FirstNonEmpty(f.UserField, "username"), creds.Username)
+	form.Set(core.FirstNonEmpty(f.PassField, "password"), creds.Password)
 	for k, v := range f.ExtraFields {
 		form.Set(k, v)
 	}
 	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
 
 	if f.CSRFRequired {
-		page, err := f.HTTP.Do(ctx, capkit.Request{Method: "GET", URL: f.LoginURL, Timeout: 20 * time.Second})
+		page, err := f.HTTP.Do(ctx, core.Request{Method: "GET", URL: f.LoginURL, Timeout: 20 * time.Second})
 		if err != nil {
 			return nil, fmt.Errorf("获取登录页失败: %w", err)
 		}
@@ -314,7 +314,7 @@ func (f *FormFlow) Login(ctx context.Context, creds capkit.Credentials) (capkit.
 		}
 	}
 
-	method := strings.ToUpper(capkit.FirstNonEmpty(f.Method, "POST"))
+	method := strings.ToUpper(core.FirstNonEmpty(f.Method, "POST"))
 	// The login page may have set a session cookie that the CSRF token is bound
 	// to (Django, Laravel, Rails, PHP all do this). Sending the form without that
 	// cookie is what a browser would never do, and the server rejects it as
@@ -322,7 +322,7 @@ func (f *FormFlow) Login(ctx context.Context, creds capkit.Credentials) (capkit.
 	if h, herr := id.Headers(ctx); herr == nil && h.Get("Cookie") != "" {
 		headers["Cookie"] = h.Get("Cookie")
 	}
-	res, err := f.HTTP.Do(ctx, capkit.Request{
+	res, err := f.HTTP.Do(ctx, core.Request{
 		Method: method, URL: f.LoginURL, Headers: headers,
 		Body: []byte(form.Encode()), Timeout: 30 * time.Second,
 	})

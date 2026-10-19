@@ -8,24 +8,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // --- fakes ---------------------------------------------------------------
 
-// fakeSession is a canned capkit.Session. It never touches the network or spawns
+// fakeSession is a canned core.Session. It never touches the network or spawns
 // a process: Exec matches the command against the longest output key it contains.
 type fakeSession struct {
-	info      capkit.SessionInfo
+	info      core.SessionInfo
 	outputs   map[string]string
 	execErr   error
 	execCalls int
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	f.execCalls++
 	if f.execErr != nil {
-		return capkit.Output{}, f.execErr
+		return core.Output{}, f.execErr
 	}
 	keys := make([]string, 0, len(f.outputs))
 	for k := range f.outputs {
@@ -34,27 +34,27 @@ func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (ca
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, k := range keys {
 		if strings.Contains(cmd, k) {
-			return capkit.Output{Command: cmd, Stdout: f.outputs[k]}, nil
+			return core.Output{Command: cmd, Stdout: f.outputs[k]}, nil
 		}
 	}
-	return capkit.Output{Command: cmd}, nil
+	return core.Output{Command: cmd}, nil
 }
 
-func (f *fakeSession) Info() capkit.SessionInfo { return f.info }
-func (f *fakeSession) Close() error             { return nil }
+func (f *fakeSession) Info() core.SessionInfo { return f.info }
+func (f *fakeSession) Close() error           { return nil }
 
-// fakeManager is an in-memory capkit.SessionManager.
-type fakeManager struct{ sessions map[string]capkit.Session }
+// fakeManager is an in-memory core.SessionManager.
+type fakeManager struct{ sessions map[string]core.Session }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, nil
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, nil
 }
-func (m *fakeManager) Get(id string) (capkit.Session, bool) {
+func (m *fakeManager) Get(id string) (core.Session, bool) {
 	s, ok := m.sessions[id]
 	return s, ok
 }
-func (m *fakeManager) List() []capkit.SessionInfo {
-	out := make([]capkit.SessionInfo, 0, len(m.sessions))
+func (m *fakeManager) List() []core.SessionInfo {
+	out := make([]core.SessionInfo, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		out = append(out, s.Info())
 	}
@@ -114,30 +114,30 @@ BUILTIN\Administrators                 Alias            S-1-5-32-544 Group used 
 	}
 }
 
-func linuxCap() capkit.Capability {
+func linuxCap() core.Capability {
 	s := &fakeSession{
-		info:    capkit.SessionInfo{ID: "s1", Kind: "ssh", Host: "10.0.0.5", OS: "linux", Arch: "amd64"},
+		info:    core.SessionInfo{ID: "s1", Kind: "ssh", Host: "10.0.0.5", OS: "linux", Arch: "amd64"},
 		outputs: linuxOutputs(),
 	}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s1": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	mgr := &fakeManager{sessions: map[string]core.Session{"s1": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 	return c
 }
 
-func windowsCap() capkit.Capability {
+func windowsCap() core.Capability {
 	s := &fakeSession{
-		info:    capkit.SessionInfo{ID: "w1", Kind: "winrm", Host: "10.0.0.9", OS: "windows"},
+		info:    core.SessionInfo{ID: "w1", Kind: "winrm", Host: "10.0.0.9", OS: "windows"},
 		outputs: windowsOutputs(),
 	}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"w1": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	mgr := &fakeManager{sessions: map[string]core.Session{"w1": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 	return c
 }
 
-func do(t *testing.T, c capkit.Capability, tool, input string) capkit.Result {
+func do(t *testing.T, c core.Capability, tool, input string) core.Result {
 	t.Helper()
-	res, err := c.Call(context.Background(), capkit.Call{
-		Tool: tool, Input: json.RawMessage(input), Context: capkit.CallContext{ProjectID: 7},
+	res, err := c.Call(context.Background(), core.Call{
+		Tool: tool, Input: json.RawMessage(input), Context: core.CallContext{ProjectID: 7},
 	})
 	if err != nil {
 		t.Fatalf("Call(%s) err = %v", tool, err)
@@ -174,7 +174,7 @@ func TestManifestContract(t *testing.T) {
 			t.Fatalf("%s invalid risk", tool.Name)
 		}
 	}
-	c, err := NewCapability(capkit.Deps{})
+	c, err := NewCapability(core.Deps{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestManifestContract(t *testing.T) {
 
 func TestEnumLinuxHappyPath(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_enum", `{"session_id":"s1"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q summary=%q", res.Status, res.Summary)
 	}
 	if res.Meta.Tool != "privesc_enum" {
@@ -229,7 +229,7 @@ func TestEnumLinuxHappyPath(t *testing.T) {
 
 func TestEnumWindowsHappyPath(t *testing.T) {
 	res := do(t, windowsCap(), "privesc_windows_enum", `{"session_id":"w1"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	var er enumResult
@@ -261,12 +261,12 @@ func TestEnumWindowsHappyPath(t *testing.T) {
 
 func TestEnumPinnedOverridesAutoDetection(t *testing.T) {
 	// Empty OS: auto would fail, but the pinned Linux tool must run.
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s2", Kind: "cli"}, outputs: linuxOutputs()}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s2": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	s := &fakeSession{info: core.SessionInfo{ID: "s2", Kind: "cli"}, outputs: linuxOutputs()}
+	mgr := &fakeManager{sessions: map[string]core.Session{"s2": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 
 	res := do(t, c, "privesc_linux_enum", `{"session_id":"s2"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("pinned status = %q summary=%q", res.Status, res.Summary)
 	}
 	var er enumResult
@@ -277,60 +277,60 @@ func TestEnumPinnedOverridesAutoDetection(t *testing.T) {
 }
 
 func TestEnumAutoUnknownPlatformFailsClosed(t *testing.T) {
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s3", Kind: "cli"}}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s3": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	s := &fakeSession{info: core.SessionInfo{ID: "s3", Kind: "cli"}}
+	mgr := &fakeManager{sessions: map[string]core.Session{"s3": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 
 	res := do(t, c, "privesc_enum", `{"session_id":"s3","platform":"auto"}`)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("expected invalid_input, got %q %+v", res.Status, res.Error)
 	}
 }
 
 func TestEnumBadPlatformValue(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_enum", `{"session_id":"s1","platform":"solaris"}`)
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("expected invalid_input, got %+v", res.Error)
 	}
 }
 
 func TestEnumSessionNotFound(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_enum", `{"session_id":"nope"}`)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("expected not_found, got %q %+v", res.Status, res.Error)
 	}
 }
 
 func TestEnumMissingSessionID(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_enum", `{}`)
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("expected invalid_input, got %+v", res.Error)
 	}
 }
 
 func TestEnumInvalidJSON(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_enum", `{bad`)
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("expected invalid_input, got %+v", res.Error)
 	}
 }
 
 func TestEnumMissingManagerToolMissing(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{})
+	c, _ := NewCapability(core.Deps{})
 	res := do(t, c, "privesc_enum", `{"session_id":"s1"}`)
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("expected tool_missing, got %q %+v", res.Status, res.Error)
 	}
 }
 
 func TestEnumExecErrorFailsClosed(t *testing.T) {
 	// A session that accepts the interface but cannot run commands.
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s4", OS: "linux"}, execErr: errors.New("exec not supported")}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s4": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	s := &fakeSession{info: core.SessionInfo{ID: "s4", OS: "linux"}, execErr: errors.New("exec not supported")}
+	mgr := &fakeManager{sessions: map[string]core.Session{"s4": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 
 	res := do(t, c, "privesc_enum", `{"session_id":"s4"}`)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeUpstreamError {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeUpstreamError {
 		t.Fatalf("expected upstream_error, got %q %+v", res.Status, res.Error)
 	}
 }
@@ -338,12 +338,12 @@ func TestEnumExecErrorFailsClosed(t *testing.T) {
 func TestEnumPartialCommandFailure(t *testing.T) {
 	// Noisy outputs: an unknown command returns empty stdout but no error, so it
 	// must be recorded without aborting the run.
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s5", OS: "linux"}, outputs: map[string]string{}}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s5": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	s := &fakeSession{info: core.SessionInfo{ID: "s5", OS: "linux"}, outputs: map[string]string{}}
+	mgr := &fakeManager{sessions: map[string]core.Session{"s5": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 
 	res := do(t, c, "privesc_enum", `{"session_id":"s5"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	var er enumResult
@@ -360,12 +360,12 @@ func TestEnumPartialCommandFailure(t *testing.T) {
 
 func TestAdviseLinuxRankedCandidates(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_advise", `{"session_id":"s1"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	var data struct {
-		Count      int               `json:"count"`
-		Candidates []capkit.NextStep `json:"candidates"`
+		Count      int             `json:"count"`
+		Candidates []core.NextStep `json:"candidates"`
 	}
 	if err := json.Unmarshal(res.Data, &data); err != nil {
 		t.Fatal(err)
@@ -385,7 +385,7 @@ func TestAdviseLinuxRankedCandidates(t *testing.T) {
 		if c.Tool != toolSessionExec {
 			t.Fatalf("candidate tool = %q", c.Tool)
 		}
-		if c.Risk != capkit.RiskHigh {
+		if c.Risk != core.RiskHigh {
 			t.Fatalf("candidate risk = %q", c.Risk)
 		}
 	}
@@ -408,7 +408,7 @@ func TestAdviseLinuxRankedCandidates(t *testing.T) {
 func TestAdviseWindowsRankedCandidates(t *testing.T) {
 	res := do(t, windowsCap(), "privesc_advise", `{"session_id":"w1"}`)
 	var data struct {
-		Candidates []capkit.NextStep `json:"candidates"`
+		Candidates []core.NextStep `json:"candidates"`
 	}
 	_ = json.Unmarshal(res.Data, &data)
 	var joined []string
@@ -435,9 +435,9 @@ func TestAdviseFromEnumResultNoSession(t *testing.T) {
 		},
 	}
 	raw, _ := json.Marshal(er)
-	c, _ := NewCapability(capkit.Deps{})
+	c, _ := NewCapability(core.Deps{})
 	res := do(t, c, "privesc_advise", `{"enum_result":`+string(raw)+`}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q summary=%q", res.Status, res.Summary)
 	}
 	var data struct {
@@ -451,32 +451,32 @@ func TestAdviseFromEnumResultNoSession(t *testing.T) {
 
 func TestAdviseRequiresInput(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_advise", `{}`)
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("expected invalid_input, got %+v", res.Error)
 	}
 }
 
 func TestAdviseSessionNotFound(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_advise", `{"session_id":"nope"}`)
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("expected not_found, got %+v", res.Error)
 	}
 }
 
 func TestAdviseMissingManager(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{})
+	c, _ := NewCapability(core.Deps{})
 	res := do(t, c, "privesc_advise", `{"session_id":"s1"}`)
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("expected tool_missing, got %q %+v", res.Status, res.Error)
 	}
 }
 
 func TestAdviseNoCandidates(t *testing.T) {
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s6", OS: "linux"}, outputs: map[string]string{}}
-	mgr := &fakeManager{sessions: map[string]capkit.Session{"s6": s}}
-	c, _ := NewCapability(capkit.Deps{Sessions: mgr})
+	s := &fakeSession{info: core.SessionInfo{ID: "s6", OS: "linux"}, outputs: map[string]string{}}
+	mgr := &fakeManager{sessions: map[string]core.Session{"s6": s}}
+	c, _ := NewCapability(core.Deps{Sessions: mgr})
 	res := do(t, c, "privesc_advise", `{"session_id":"s6"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	var data struct {
@@ -496,9 +496,9 @@ func TestAdviseDefaultsPlatformWhenSignalsBlank(t *testing.T) {
 	// yields a proper envelope.
 	er := enumResult{Signals: Signals{PasswdWritable: true}}
 	raw, _ := json.Marshal(er)
-	c, _ := NewCapability(capkit.Deps{})
+	c, _ := NewCapability(core.Deps{})
 	res := do(t, c, "privesc_advise", `{"enum_result":`+string(raw)+`}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 }
@@ -507,7 +507,7 @@ func TestAdviseDefaultsPlatformWhenSignalsBlank(t *testing.T) {
 
 func TestUnknownTool(t *testing.T) {
 	res := do(t, linuxCap(), "privesc_nope", `{}`)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("expected not_found, got %q %+v", res.Status, res.Error)
 	}
 }
@@ -586,7 +586,7 @@ func TestSignalCount(t *testing.T) {
 }
 
 func TestSignalsFindings(t *testing.T) {
-	target := capkit.Target{Kind: capkit.TargetHost, Host: "h"}
+	target := core.Target{Kind: core.TargetHost, Host: "h"}
 	findings := signalsFindings(Signals{
 		Platform:              platformWindows,
 		PolkitVersion:         "0.105",
@@ -610,13 +610,13 @@ func TestSignalsFindings(t *testing.T) {
 }
 
 func TestHostOrIDAndSessionTarget(t *testing.T) {
-	if got := hostOrID(capkit.SessionInfo{ID: "id1"}); got != "id1" {
+	if got := hostOrID(core.SessionInfo{ID: "id1"}); got != "id1" {
 		t.Fatalf("hostOrID = %q", got)
 	}
-	if got := hostOrID(capkit.SessionInfo{ID: "id1", Host: "Host"}); got != "Host" {
+	if got := hostOrID(core.SessionInfo{ID: "id1", Host: "Host"}); got != "Host" {
 		t.Fatalf("hostOrID = %q", got)
 	}
-	tg := sessionTarget(capkit.SessionInfo{ID: "id1", Host: "H"}, 3)
+	tg := sessionTarget(core.SessionInfo{ID: "id1", Host: "H"}, 3)
 	if tg.Host != "h" || tg.ProjectID != 3 {
 		t.Fatalf("target = %+v", tg)
 	}

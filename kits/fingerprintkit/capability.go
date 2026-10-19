@@ -6,26 +6,26 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Capability exposes the fingerprint provider as an agent tool. It uses the
 // gate-aware HTTPDoer, so scope/rate/audit cannot be bypassed.
 type Capability struct {
-	provider capkit.FingerprintProvider
-	deps     capkit.Deps
+	provider core.FingerprintProvider
+	deps     core.Deps
 }
 
 // NewCapability builds the capability. Rules come from the host: if it already
 // provides a *Provider as Deps.Fingerprints it is reused (so verifykit and this
 // tool share one rule set); otherwise an empty provider is created and the tool
 // reports unavailable until rules are loaded.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	c := &Capability{deps: deps}
 	switch p := deps.Fingerprints.(type) {
 	case *Provider:
 		c.provider = p
-	case capkit.FingerprintProvider:
+	case core.FingerprintProvider:
 		if p != nil {
 			c.provider = p
 		}
@@ -37,15 +37,15 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
 }
 
 // Manifest declares the fingerprint toolkit.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "fingerprintkit", Version: "0.2.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "http"},
-		Tools: []capkit.ToolSpec{{
+		Tools: []core.ToolSpec{{
 			Name:        "fingerprint_detect",
 			Description: "对单个目标做 HTTP 指纹识别：按已加载的规则集匹配响应头/正文/Cookie/favicon，返回产品、版本、分类与置信度。只读，不写入资产图。",
-			Risk:        capkit.RiskLow,
-			RateLimit:   capkit.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4},
+			Risk:        core.RiskLow,
+			RateLimit:   core.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4},
 			InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -63,7 +63,7 @@ func Manifest() capkit.Manifest {
     }}
   }
 }`),
-			ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+			ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 				var in struct {
 					URL  string `json:"url"`
 					Host string `json:"host"`
@@ -82,32 +82,32 @@ func Manifest() capkit.Manifest {
 						raw = fmt.Sprintf("%s:%d", in.Host, in.Port)
 					}
 				}
-				t, err := capkit.TargetFromString(0, raw)
+				t, err := core.TargetFromString(0, raw)
 				if err != nil {
 					return nil, err
 				}
-				return []capkit.Target{t}, nil
+				return []core.Target{t}, nil
 			},
 		}},
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the fingerprint tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "fingerprint_detect":
 		return c.detect(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) detect(ctx context.Context, call core.Call) (core.Result, error) {
 	if c.provider == nil {
-		return capkit.FailResult(capkit.ToolMissing("指纹规则未加载：宿主需注入 FingerprintProvider 或 HTTPDoer")), nil
+		return core.FailResult(core.ToolMissing("指纹规则未加载：宿主需注入 FingerprintProvider 或 HTTPDoer")), nil
 	}
 	var in struct {
 		URL  string `json:"url"`
@@ -115,7 +115,7 @@ func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Resul
 		Port int    `json:"port"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	raw := strings.TrimSpace(in.URL)
 	if raw == "" {
@@ -124,15 +124,15 @@ func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Resul
 			raw = fmt.Sprintf("%s:%d", in.Host, in.Port)
 		}
 	}
-	target, err := capkit.TargetFromString(0, raw)
+	target, err := core.TargetFromString(0, raw)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	techs, err := c.provider.Fingerprint(ctx, target)
 	if err != nil {
-		return capkit.FailResult(capkit.AsError(err)), nil
+		return core.FailResult(core.AsError(err)), nil
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("命中 %d 项指纹", len(techs)), map[string]any{"fingerprints": techs})
+	res, _ := core.SuccessResult(fmt.Sprintf("命中 %d 项指纹", len(techs)), map[string]any{"fingerprints": techs})
 	res.Meta.Target = target.Key()
 	if len(techs) == 0 {
 		res.Summary = "未命中已知指纹"

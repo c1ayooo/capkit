@@ -1,13 +1,13 @@
 // Package spacemapkit ports the five space-mapping engines (FOFA, ZoomEye,
-// Quake, Shodan, Hunter) into capkit. It depends only on the capkit root
-// package: HTTP goes through capkit.Fetcher (external, rate-limited/audited
+// Quake, Shodan, Hunter) into core. It depends only on the capkit root
+// package: HTTP goes through core.Fetcher (external, rate-limited/audited
 // but not project-scope-checked), and normalized results are returned as
 // plain structs for the host to import into its asset store.
 //
 // Engine-specific quirks (ZoomEye list-shaped fields, Quake rejecting `icp` in
 // include, Shodan's 100-per-page loop, Hunter page_size<=100) stay inside the
 // adapters. Keys and base URLs are resolved from injected resolvers first, then
-// capkit.Settings, then environment variables.
+// core.Settings, then environment variables.
 package spacemapkit
 
 import (
@@ -22,15 +22,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Client executes space-mapping queries through an injected Fetcher.
 type Client struct {
-	Fetcher  capkit.Fetcher
-	Settings capkit.Settings
+	Fetcher  core.Fetcher
+	Settings core.Settings
 	// KeyResolver overrides key lookup (e.g. a host vault); nil falls back to
-	// env then capkit.Settings.
+	// env then core.Settings.
 	KeyResolver func(provider string) string
 	// BaseURLResolver overrides the built-in endpoint (self-hosted reverse proxy).
 	BaseURLResolver func(provider string) string
@@ -39,11 +39,11 @@ type Client struct {
 }
 
 // NewClient builds an engine client. A Fetcher is required for actual calls.
-func NewClient(deps capkit.Deps) *Client {
+func NewClient(deps core.Deps) *Client {
 	return &Client{Fetcher: deps.Fetcher, Settings: deps.Settings}
 }
 
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return NewClient(deps), nil }
+func NewCapability(deps core.Deps) (core.Capability, error) { return NewClient(deps), nil }
 
 // SearchRequest 引擎查询入参(engine 归一化名之外的原始形态)。
 type SearchRequest struct {
@@ -368,13 +368,13 @@ func (h *Client) zoomEyeSearchCtx(ctx context.Context, req SearchRequest, apiKey
 		return nil, fmt.Errorf("解析 ZoomEye 响应失败: %w", err)
 	}
 	if zoomEyeRequestFailed(apiResp.Code, apiResp.Message) {
-		msg := capkit.FirstNonEmpty(apiResp.Message, messageFromRawObject(apiResp.Data), "ZoomEye 返回错误")
+		msg := core.FirstNonEmpty(apiResp.Message, messageFromRawObject(apiResp.Data), "ZoomEye 返回错误")
 		return nil, fmt.Errorf("%s", msg)
 	}
 	fields := splitAndCleanCSV(req.Fields)
 	return &SearchResponse{
 		Provider:     "zoomeye",
-		Query:        capkit.FirstNonEmpty(apiResp.Query, req.Query),
+		Query:        core.FirstNonEmpty(apiResp.Query, req.Query),
 		Size:         firstPositive(apiResp.PageSize, req.Size),
 		Page:         firstPositive(apiResp.Page, req.Page),
 		Total:        apiResp.Total,
@@ -409,7 +409,7 @@ func (h *Client) quakeSearchCtx(ctx context.Context, req SearchRequest, apiKey s
 		return nil, fmt.Errorf("解析 Quake 响应失败: %w", err)
 	}
 	if !isZeroSpaceSearchCode(apiResp.Code) {
-		msg := capkit.FirstNonEmpty(apiResp.Message, messageFromRawObject(apiResp.Data), "Quake 返回错误")
+		msg := core.FirstNonEmpty(apiResp.Message, messageFromRawObject(apiResp.Data), "Quake 返回错误")
 		return nil, fmt.Errorf("%s", msg)
 	}
 	total := firstPositive(apiResp.TotalCount, apiResp.Meta.Pagination.Total)
@@ -457,7 +457,7 @@ func (h *Client) shodanSearchCtx(ctx context.Context, req SearchRequest, apiKey 
 		if err := h.doJSONRequestCtx(ctx, http.MethodGet, pageURL.String(), "", "", nil, &apiResp, "Shodan"); err != nil {
 			return nil, err
 		}
-		if errMsg := capkit.FirstNonEmpty(apiResp.Error, apiResp.Message); errMsg != "" {
+		if errMsg := core.FirstNonEmpty(apiResp.Error, apiResp.Message); errMsg != "" {
 			return nil, fmt.Errorf("%s", errMsg)
 		}
 		pageMatches, err := decodeSpaceSearchRows(apiResp.Matches)
@@ -580,7 +580,7 @@ func (h *Client) doJSONRequestCtx(ctx context.Context, method, endpoint, apiKey,
 	if headerName != "" && apiKey != "" {
 		headers[headerName] = apiKey
 	}
-	resp, err := h.Fetcher.Fetch(ctx, capkit.Request{
+	resp, err := h.Fetcher.Fetch(ctx, core.Request{
 		Method: method, URL: endpoint, Headers: headers, Body: payload,
 		Timeout: 60 * time.Second,
 	})

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // This file exposes the identity primitives as agent-facing tools. The
@@ -23,21 +23,21 @@ import (
 // Capability exposes the three identity tools. It reads the host's registered
 // flows for identity_login and the gate-aware HTTPDoer for identity_csrf.
 type Capability struct {
-	deps  capkit.Deps
+	deps  core.Deps
 	flows *AuthFlowRegistry
 }
 
 // NewCapability builds the identity capability with an empty flow registry. Use
 // it when the host has nothing to register yet; identity_login will report the
 // kind as unregistered rather than pretend to log in.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps, flows: NewAuthFlowRegistry()}, nil
 }
 
 // NewCapabilityWithFlows builds the capability over a registry the host has
 // already assembled. This is the constructor a real wiring uses: the registry
 // is the thing that carries the sites.
-func NewCapabilityWithFlows(deps capkit.Deps, flows *AuthFlowRegistry) (capkit.Capability, error) {
+func NewCapabilityWithFlows(deps core.Deps, flows *AuthFlowRegistry) (core.Capability, error) {
 	if flows == nil {
 		flows = NewAuthFlowRegistry()
 	}
@@ -45,21 +45,21 @@ func NewCapabilityWithFlows(deps capkit.Deps, flows *AuthFlowRegistry) (capkit.C
 }
 
 // Manifest declares the identity tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "identitykit", Version: "0.3.0", APIVersion: "v1",
 		Requires: []string{"http"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			identityLoginSpec(), identityCSRFSpec(), identityTokenCheckSpec(),
 		},
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the identity tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "identity_login":
 		return c.login(ctx, call)
@@ -68,18 +68,18 @@ func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result,
 	case "identity_token_check":
 		return c.tokenCheck(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
 // --- tool specs ---
 
-func identityLoginSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func identityLoginSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "identity_login",
 		Description: "在目标站点上登录并返回一个可用身份。kind 决定走宿主注册的哪种登录流程（form/json/oauth/cas/bearer）；凭据只从入参读取，不落盘也不明文进日志与证据。返回身份的用户名、作用域主机与标签，供后续 HTTP 工具注入登录态。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -108,12 +108,12 @@ func identityLoginSpec() capkit.ToolSpec {
 	}
 }
 
-func identityCSRFSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func identityCSRFSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "identity_csrf",
 		Description: "GET 一个页面并抽取其中的 CSRF token（hidden input 或 meta 标签），返回 token 名、值与来源，可直接填进登录表单。只读单个页面，不提交任何表单。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -137,12 +137,12 @@ func identityCSRFSpec() capkit.ToolSpec {
 	}
 }
 
-func identityTokenCheckSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func identityTokenCheckSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "identity_token_check",
 		Description: "判定一个 token 现在是否需要刷新，给出 needs_refresh 与判断依据（剩余寿命对比安全余量）。expires_at 为空视为「无过期信息」，单独不触发刷新。token 本体不出现在任何返回里。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 2},
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -170,7 +170,7 @@ func identityTokenCheckSpec() capkit.ToolSpec {
 
 // --- handlers ---
 
-// loginInput is kept separate from capkit.Credentials so the JSON shape stays
+// loginInput is kept separate from core.Credentials so the JSON shape stays
 // flat (username/password at the top level) while the flow still receives the
 // full credential set.
 type loginInput struct {
@@ -183,24 +183,24 @@ type loginInput struct {
 	Fields   map[string]string `json:"fields"`
 }
 
-func (c *Capability) login(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) login(ctx context.Context, call core.Call) (core.Result, error) {
 	var in loginInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.Target) == "" {
-		return capkit.FailResult(capkit.InvalidInput("target 必填")), nil
+		return core.FailResult(core.InvalidInput("target 必填")), nil
 	}
 	kind, err := NormalizeAuthKind(in.Kind)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if in.Username == "" && in.Token == "" && len(in.Cookies) == 0 {
-		return capkit.FailResult(capkit.InvalidInput("username / token / cookies 至少给一项")), nil
+		return core.FailResult(core.InvalidInput("username / token / cookies 至少给一项")), nil
 	}
 	flow, ok := c.flows.Lookup(kind)
 	if !ok {
-		return capkit.FailResult(capkit.ToolMissing(
+		return core.FailResult(core.ToolMissing(
 			"未注册 kind=" + kind + " 的 AuthFlow（已注册：" + kindHint(c.flows) + "）")), nil
 	}
 
@@ -212,62 +212,62 @@ func (c *Capability) login(ctx context.Context, call capkit.Call) (capkit.Result
 	// the right site parameters, instead of capkit inventing a routing scheme.
 	fields["target"] = strings.TrimSpace(in.Target)
 
-	id, err := flow.Login(ctx, capkit.Credentials{
+	id, err := flow.Login(ctx, core.Credentials{
 		Username: in.Username, Password: in.Password, Token: in.Token,
 		Cookies: in.Cookies, Fields: fields,
 	})
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError("登录失败：" + sanitizeLoginError(err.Error()))), nil
+		return core.FailResult(core.UpstreamError("登录失败：" + sanitizeLoginError(err.Error()))), nil
 	}
 	if id == nil {
-		return capkit.FailResult(capkit.UpstreamError("登录流程未返回身份")), nil
+		return core.FailResult(core.UpstreamError("登录流程未返回身份")), nil
 	}
 	scope := id.Scope()
 	headers, herr := id.Headers(ctx)
 	if herr != nil {
-		return capkit.FailResult(capkit.UpstreamError("身份头部生成失败：" + herr.Error())), nil
+		return core.FailResult(core.UpstreamError("身份头部生成失败：" + herr.Error())), nil
 	}
 
 	// The header values are live session material. The envelope reports that an
 	// identity exists and what it covers; the raw values stay with the host
 	// (red line 7: credentials never in logs or evidence).
-	data, _ := capkit.DataResult(map[string]any{
+	data, _ := core.DataResult(map[string]any{
 		"kind": kind, "user": scope.User, "hosts": scope.Hosts,
 		"label": scope.Label, "project_id": scope.ProjectID,
 		"headers": redactHeaders(headers),
 	})
-	data.Summary = capkit.ClampSummary(fmt.Sprintf("已在 %s 登录（kind=%s，身份 %s，作用域 %s）",
+	data.Summary = core.ClampSummary(fmt.Sprintf("已在 %s 登录（kind=%s，身份 %s，作用域 %s）",
 		targetLabel(in.Target), kind, identityUserLabel(scope.User), hostsLabel(scope.Hosts)))
 	data.Meta.Target = strings.TrimSpace(in.Target)
-	data.Next = []capkit.NextStep{{
+	data.Next = []core.NextStep{{
 		Tool:          "identity_csrf",
 		Reason:        "登录后如要发写操作，先取该站点当前 CSRF token",
-		Risk:          capkit.RiskLow,
+		Risk:          core.RiskLow,
 		Preconditions: []string{"identity.login"},
 		Params:        mustJSON(map[string]any{"url": strings.TrimSpace(in.Target)}),
 	}}
 	return data, nil
 }
 
-func (c *Capability) csrf(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) csrf(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		URL  string `json:"url"`
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.URL) == "" {
-		return capkit.FailResult(capkit.InvalidInput("url 必填")), nil
+		return core.FailResult(core.InvalidInput("url 必填")), nil
 	}
 	if c.deps.HTTP == nil {
-		return capkit.FailResult(capkit.ToolMissing("HTTPDoer 未注入（宿主需提供 capkit.Deps.HTTP）")), nil
+		return core.FailResult(core.ToolMissing("HTTPDoer 未注入（宿主需提供 core.Deps.HTTP）")), nil
 	}
-	res, err := c.deps.HTTP.Do(ctx, capkit.Request{
+	res, err := c.deps.HTTP.Do(ctx, core.Request{
 		Method: http.MethodGet, URL: strings.TrimSpace(in.URL), Timeout: 20 * time.Second,
 	})
 	if err != nil {
-		return capkit.FailResult(capkit.TargetUnreachable("页面获取失败：" + err.Error())), nil
+		return core.FailResult(core.TargetUnreachable("页面获取失败：" + err.Error())), nil
 	}
 	name, token, source := ExtractCSRFWithSource(string(res.Body), strings.TrimSpace(in.Name))
 	if token == "" {
@@ -277,19 +277,19 @@ func (c *Capability) csrf(ctx context.Context, call capkit.Call) (capkit.Result,
 	// referenced (evidence) rather than echoed; the Summary carries the name and
 	// whether a token was found.
 	ref := c.recordPage(ctx, in.URL, res)
-	out, _ := capkit.DataResult(map[string]any{
+	out, _ := core.DataResult(map[string]any{
 		"found": token != "", "name": name, "token": token,
 		"source": source, "status": res.Status, "evidence_id": ref.ID,
 	})
-	out.Summary = capkit.ClampSummary(csrfSummary(token != "", name, source, res.Status, strings.TrimSpace(in.URL)))
+	out.Summary = core.ClampSummary(csrfSummary(token != "", name, source, res.Status, strings.TrimSpace(in.URL)))
 	out.Meta.Target = strings.TrimSpace(in.URL)
 	if ref.ID != "" {
-		out.Evidence = []capkit.EvidenceRef{ref}
+		out.Evidence = []core.EvidenceRef{ref}
 	}
 	return out, nil
 }
 
-func (c *Capability) tokenCheck(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) tokenCheck(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		AccessToken string `json:"access_token"`
 		ExpiresAt   string `json:"expires_at"`
@@ -297,23 +297,23 @@ func (c *Capability) tokenCheck(ctx context.Context, call capkit.Call) (capkit.R
 		SkewMS      int    `json:"skew_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.AccessToken) == "" {
-		return capkit.FailResult(capkit.InvalidInput("access_token 必填")), nil
+		return core.FailResult(core.InvalidInput("access_token 必填")), nil
 	}
-	snap := capkit.TokenSnapshot{AccessToken: in.AccessToken}
+	snap := core.TokenSnapshot{AccessToken: in.AccessToken}
 	if strings.TrimSpace(in.ExpiresAt) != "" {
 		t, err := time.Parse(time.RFC3339, strings.TrimSpace(in.ExpiresAt))
 		if err != nil {
-			return capkit.FailResult(capkit.InvalidInput("expires_at 不是 RFC3339：" + err.Error())), nil
+			return core.FailResult(core.InvalidInput("expires_at 不是 RFC3339：" + err.Error())), nil
 		}
 		snap.ExpiresAt = t
 	}
 	if strings.TrimSpace(in.IssuedAt) != "" {
 		t, err := time.Parse(time.RFC3339, strings.TrimSpace(in.IssuedAt))
 		if err != nil {
-			return capkit.FailResult(capkit.InvalidInput("issued_at 不是 RFC3339：" + err.Error())), nil
+			return core.FailResult(core.InvalidInput("issued_at 不是 RFC3339：" + err.Error())), nil
 		}
 		snap.IssuedAt = t
 	}
@@ -346,12 +346,12 @@ func (c *Capability) tokenCheck(ctx context.Context, call capkit.Call) (capkit.R
 	if !snap.IssuedAt.IsZero() {
 		ageMS = now.Sub(snap.IssuedAt).Milliseconds()
 	}
-	res, _ := capkit.DataResult(map[string]any{
+	res, _ := core.DataResult(map[string]any{
 		"needs_refresh": need, "reason": reason, "remaining_ms": remainingMS,
 		"skew_ms": skew.Milliseconds(), "has_expiry": !snap.ExpiresAt.IsZero(),
 		"expires_at": formatTime(snap.ExpiresAt), "age_ms": ageMS,
 	})
-	res.Summary = capkit.ClampSummary(fmt.Sprintf("token 刷新判定 needs_refresh=%v：%s", need, reason))
+	res.Summary = core.ClampSummary(fmt.Sprintf("token 刷新判定 needs_refresh=%v：%s", need, reason))
 	return res, nil
 }
 
@@ -366,8 +366,8 @@ func (c *Capability) now() time.Time {
 
 // extractURLTarget builds an ExtractTargets for a tool whose target is a URL
 // field, so the scope gate sees the host before the kit is called.
-func extractURLTarget(field string) func(json.RawMessage) ([]capkit.Target, error) {
-	return func(input json.RawMessage) ([]capkit.Target, error) {
+func extractURLTarget(field string) func(json.RawMessage) ([]core.Target, error) {
+	return func(input json.RawMessage) ([]core.Target, error) {
 		var in map[string]any
 		if err := json.Unmarshal(input, &in); err != nil {
 			return nil, err
@@ -376,27 +376,27 @@ func extractURLTarget(field string) func(json.RawMessage) ([]capkit.Target, erro
 		if strings.TrimSpace(raw) == "" {
 			return nil, fmt.Errorf("%s 必填", field)
 		}
-		t, err := capkit.TargetFromURL(0, strings.TrimSpace(raw))
+		t, err := core.TargetFromURL(0, strings.TrimSpace(raw))
 		if err != nil {
 			return nil, err
 		}
-		return []capkit.Target{t}, nil
+		return []core.Target{t}, nil
 	}
 }
 
 // recordPage stores the fetched page as evidence. CSRF pages are usually small,
 // but the rule is the rule: the body is referenced, never inlined in Data.
-func (c *Capability) recordPage(ctx context.Context, url string, res *capkit.Response) capkit.EvidenceRef {
+func (c *Capability) recordPage(ctx context.Context, url string, res *core.Response) core.EvidenceRef {
 	if res == nil {
-		return capkit.EvidenceRef{}
+		return core.EvidenceRef{}
 	}
-	ref := capkit.EvidenceRef{
-		Kind: "http_exchange", Size: len(res.Body), Preview: capkit.PreviewRunes(string(res.Body), 200),
+	ref := core.EvidenceRef{
+		Kind: "http_exchange", Size: len(res.Body), Preview: core.PreviewRunes(string(res.Body), 200),
 	}
 	if c.deps.Evidence == nil {
 		return ref
 	}
-	ev := capkit.Evidence{
+	ev := core.Evidence{
 		Kind: "http_exchange", Title: "identity_csrf " + url,
 		Response: res.Body, CreatedAt: time.Now(),
 		Metadata: map[string]string{"tool": "identity_csrf", "url": url, "status": fmt.Sprint(res.Status)},
@@ -450,7 +450,7 @@ func sanitizeLoginError(msg string) string {
 	if cleaned == "" {
 		cleaned = "登录被拒绝（详情已脱敏）"
 	}
-	return capkit.Truncate(cleaned, 160)
+	return core.Truncate(cleaned, 160)
 }
 
 // credentialFieldNames are the words whose appearance in a login error means

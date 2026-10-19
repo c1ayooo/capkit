@@ -100,7 +100,7 @@ func (p *huaweiProvider) huaweiCredential(creds Credentials) (*basic.Credentials
 }
 
 // huaweiHTTP is the shared SDK HTTP config. Its RoundTripper is the injected
-// capkit.HTTPDoer, so every SDK request (including the SDK's own project-id
+// core.HTTPDoer, so every SDK request (including the SDK's own project-id
 // lookup) passes the host's scope check, rate limit and audit. Retries are
 // pinned to one attempt: the host's limiter already owns retry policy, and a
 // silent SDK retry would multiply what Meta.Requests reports.

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-// Kind implements capkit.TemplateEngine for kind=nuclei.
+// Kind implements core.TemplateEngine for kind=nuclei.
 func (k *Kit) Kind() string { return "nuclei" }
 
 type engineResult struct {
@@ -23,9 +23,9 @@ type engineResult struct {
 // Execute writes each template artifact to a temporary file and runs nuclei
 // against the single target. Scope/rate/audit are enforced by the injected
 // ProcessRunner and the runtime gates.
-func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target capkit.Target, opts map[string]any) (capkit.Result, error) {
+func (k *Kit) Execute(ctx context.Context, refs []core.TemplateRef, target core.Target, opts map[string]any) (core.Result, error) {
 	if k.Binaries == nil || k.Processes == nil {
-		return capkit.FailResult(capkit.Unavailable("nuclei binary/process runner is not configured")), nil
+		return core.FailResult(core.Unavailable("nuclei binary/process runner is not configured")), nil
 	}
 	targetURL := strings.TrimSpace(target.URL)
 	if targetURL == "" {
@@ -34,7 +34,7 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 			host = target.IP
 		}
 		if host == "" {
-			return capkit.FailResult(capkit.InvalidInput("target has no URL/host")), nil
+			return core.FailResult(core.InvalidInput("target has no URL/host")), nil
 		}
 		targetURL = "http://" + host
 	}
@@ -46,7 +46,7 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 	}
 	path, _, err := k.Binaries.Ensure(ctx, "nuclei", version)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	timeout := 120 * time.Second
 	if v, ok := opts["timeout_sec"].(float64); ok && v > 0 {
@@ -79,11 +79,11 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 			results = append(results, res)
 			continue
 		}
-		proc, rerr := k.Processes.Run(ctx, capkit.ProcessSpec{
+		proc, rerr := k.Processes.Run(ctx, core.ProcessSpec{
 			Path:    path,
 			Args:    []string{"-u", targetURL, "-t", tplPath, "-jsonl", "-silent", "-no-color"},
-			Timeout: timeout, Targets: []capkit.Target{target},
-			RateLimit: capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
+			Timeout: timeout, Targets: []core.Target{target},
+			RateLimit: core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
 		})
 		_ = os.RemoveAll(dir)
 		if rerr != nil {
@@ -98,7 +98,7 @@ func (k *Kit) Execute(ctx context.Context, refs []capkit.TemplateRef, target cap
 		}
 		results = append(results, res)
 	}
-	out, _ := capkit.DataResult(map[string]any{
+	out, _ := core.DataResult(map[string]any{
 		"target": target, "results": results, "template_count": len(refs), "hit_count": totalHits,
 	})
 	return out, nil

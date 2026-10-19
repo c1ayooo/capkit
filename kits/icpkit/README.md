@@ -26,7 +26,7 @@ Uses the external `Fetcher` port：请求有限速与审计，但不做项目目
 （MIIT 是数据源，不是被授权目标）。出口代理由宿主注入：
 
 ```go
-kit := icpkit.New(capkit.Deps{Fetcher: fetch})
+kit := icpkit.New(core.Deps{Fetcher: fetch})
 kit.Client().WithProxy("http://127.0.0.1:8888") // 可选
 ```
 

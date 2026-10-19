@@ -26,11 +26,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/examples/lab"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/identitykit"
@@ -46,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 1, Actor: "identity-login-example"}
+	cc := core.CallContext{ProjectID: 1, Actor: "identity-login-example"}
 
 	var target, user, pass string
 	if *base != "" {
@@ -80,7 +80,7 @@ func main() {
 		Target:       target,
 		HTTP:         httpDoer,
 		CSRFRequired: true, // the login page carries a hidden csrf_token
-		Scope: capkit.IdentityScope{
+		Scope: core.IdentityScope{
 			Hosts: []string{hostOf(target)}, User: user, Label: "example-site",
 		},
 	}); err != nil {
@@ -88,7 +88,7 @@ func main() {
 	}
 	fmt.Println("registered flow kinds:", flows.Kinds())
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterIdentity(reg, flows); err != nil {
 		log.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("status:", res.Status, "| summary:", res.Summary)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		fatalf("identity_login failed: %s / %+v", res.Summary, res.Error)
 	}
 	var out struct {
@@ -131,7 +131,7 @@ func main() {
 	if !ok {
 		fatalf("form flow vanished from the registry")
 	}
-	id, err := flow.Login(ctx, capkit.Credentials{Username: user, Password: pass})
+	id, err := flow.Login(ctx, core.Credentials{Username: user, Password: pass})
 	if err != nil {
 		fatalf("host-side login failed: %v", err)
 	}
@@ -148,7 +148,7 @@ func main() {
 
 	// The proof that the cookie is the real session: the protected page accepts
 	// it. Nothing here passes the cookie explicitly — it comes from Headers().
-	probe, err := httpDoer.Do(ctx, capkit.Request{
+	probe, err := httpDoer.Do(ctx, core.Request{
 		Method: http.MethodGet, URL: userinfoURL,
 		Headers: flatten(headers), Timeout: 20 * time.Second,
 	})
@@ -162,7 +162,7 @@ func main() {
 
 	// ---- 3. the counter-example: no cookie, no access ----
 	fmt.Println("\n== 3. control: the same page without the identity ==")
-	anon, err := httpDoer.Do(ctx, capkit.Request{Method: http.MethodGet, URL: userinfoURL, Timeout: 20 * time.Second})
+	anon, err := httpDoer.Do(ctx, core.Request{Method: http.MethodGet, URL: userinfoURL, Timeout: 20 * time.Second})
 	if err != nil {
 		log.Fatal(err)
 	}

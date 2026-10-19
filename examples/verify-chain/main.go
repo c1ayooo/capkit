@@ -15,11 +15,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/sealer"
 	"github.com/c1ayooo/capkit/adapters/settings"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/templatekit"
 	"github.com/c1ayooo/capkit/kits/verifykit"
@@ -30,8 +30,8 @@ import (
 // real scanner. Here it always reports nginx so the catalog match is visible.
 type stubFingerprints struct{}
 
-func (stubFingerprints) Fingerprint(context.Context, capkit.Target) ([]capkit.Fingerprint, error) {
-	return []capkit.Fingerprint{{Product: "nginx", Version: "1.18.0", Category: "web-server", Confidence: 90}}, nil
+func (stubFingerprints) Fingerprint(context.Context, core.Target) ([]core.Fingerprint, error) {
+	return []core.Fingerprint{{Product: "nginx", Version: "1.18.0", Category: "web-server", Confidence: 90}}, nil
 }
 
 // stubEngine is a TemplateEngine. It reports a finding for each template,
@@ -40,15 +40,15 @@ type stubEngine struct{}
 
 func (stubEngine) Kind() string { return "http" }
 
-func (stubEngine) Execute(_ context.Context, refs []capkit.TemplateRef, target capkit.Target, _ map[string]any) (capkit.Result, error) {
-	findings := make([]capkit.Finding, 0, len(refs))
+func (stubEngine) Execute(_ context.Context, refs []core.TemplateRef, target core.Target, _ map[string]any) (core.Result, error) {
+	findings := make([]core.Finding, 0, len(refs))
 	for _, r := range refs {
-		findings = append(findings, capkit.Finding{
+		findings = append(findings, core.Finding{
 			Target: target, Kind: "template:" + r.ID, Confirmed: true,
 			Fingerprint: r.ID + "|" + target.Key(), Source: "verify-chain-example",
 		})
 	}
-	res := capkit.NewResult(capkit.StatusSuccess, fmt.Sprintf("执行 %d 个模板，命中 %d 项", len(refs), len(findings)))
+	res := core.NewResult(core.StatusSuccess, fmt.Sprintf("执行 %d 个模板，命中 %d 项", len(refs), len(findings)))
 	res.Findings = findings
 	if next, err := plannerSuggest(findings...); err == nil {
 		res.Next = next
@@ -57,10 +57,10 @@ func (stubEngine) Execute(_ context.Context, refs []capkit.TemplateRef, target c
 }
 
 // Suggest is a tiny helper so the example can call the planner without noise.
-func plannerSuggest(fs ...capkit.Finding) ([]capkit.NextStep, error) {
-	var out []capkit.NextStep
+func plannerSuggest(fs ...core.Finding) ([]core.NextStep, error) {
+	var out []core.NextStep
 	for _, f := range fs {
-		steps, err := capkit.DefaultPlanner().Suggest(context.Background(), f)
+		steps, err := core.DefaultPlanner().Suggest(context.Background(), f)
 		if err != nil {
 			return nil, err
 		}
@@ -99,8 +99,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	reg := capkit.NewRegistry()
-	spec := capkit.Spec{Manifest: verifykit.Manifest(), New: verifykit.NewCapability}
+	reg := core.NewRegistry()
+	spec := core.Spec{Manifest: verifykit.Manifest(), New: verifykit.NewCapability}
 	if err := reg.Add(spec); err != nil {
 		log.Fatal(err)
 	}
@@ -109,13 +109,13 @@ func main() {
 		Scope: scope, Approval: gates.AutoApprove(), Limiter: limiter, Audit: audit,
 		HTTP: httpx.New(scope, limiter, audit), Settings: settings.New(nil), Sealer: seal,
 		Fingerprints: stubFingerprints{}, Templates: catalog,
-		TemplateEngines: map[string]capkit.TemplateEngine{"http": stubEngine{}},
+		TemplateEngines: map[string]core.TemplateEngine{"http": stubEngine{}},
 	}, reg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 1, Actor: "example"}
+	cc := core.CallContext{ProjectID: 1, Actor: "example"}
 
 	planIn, _ := json.Marshal(map[string]any{"target": target.URL})
 	plan, err := rt.Call(ctx, "verify_plan", planIn, cc)

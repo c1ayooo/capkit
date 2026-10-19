@@ -2,7 +2,7 @@ package spacemapkit
 
 import (
 	"fmt"
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"strings"
 )
 
@@ -52,7 +52,7 @@ func DomainQueryTemplate(provider string) string {
 
 // SummarizeRow compresses one engine row into a single line for tool output.
 func SummarizeRow(row map[string]interface{}) string {
-	host := capkit.FirstNonEmpty(
+	host := core.FirstNonEmpty(
 		rowStringValue(row, "host"),
 		rowStringValue(row, "domain"),
 		rowStringValue(row, "ip"), rowStringValue(row, "ip_str"),

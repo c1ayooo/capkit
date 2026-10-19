@@ -8,22 +8,22 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // errNoRoute 模拟传输层不可达。
 var errNoRoute = errors.New("simulated transport failure")
 
-// fetchFunc 适配函数为 capkit.Fetcher，便于内联桩响应。
-type fetchFunc func(ctx context.Context, req capkit.Request) (*capkit.Response, error)
+// fetchFunc 适配函数为 core.Fetcher，便于内联桩响应。
+type fetchFunc func(ctx context.Context, req core.Request) (*core.Response, error)
 
-func (f fetchFunc) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f fetchFunc) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
 	return f(ctx, req)
 }
 
 // json200 构造 200 JSON 响应。
-func json200(body string) *capkit.Response {
-	return &capkit.Response{
+func json200(body string) *core.Response {
+	return &core.Response{
 		Status:  200,
 		Body:    []byte(body),
 		Headers: map[string][]string{"Content-Type": {"application/json"}},
@@ -31,14 +31,14 @@ func json200(body string) *capkit.Response {
 }
 
 // statusResp 构造任意状态码响应。
-func statusResp(status int, body string) *capkit.Response {
-	return &capkit.Response{Status: status, Body: []byte(body)}
+func statusResp(status int, body string) *core.Response {
+	return &core.Response{Status: status, Body: []byte(body)}
 }
 
 // stubRoute 一条「URL 子串 → 预置响应」的路由规则，按声明顺序匹配。
 type stubRoute struct {
 	sub  string
-	resp *capkit.Response
+	resp *core.Response
 }
 
 // stubFetcher 按 URL 子串分发预置响应并记录收到的请求。provider 里的绝对
@@ -46,7 +46,7 @@ type stubRoute struct {
 type stubFetcher struct {
 	mu     sync.Mutex
 	routes []stubRoute
-	seen   []capkit.Request
+	seen   []core.Request
 	err    error
 }
 
@@ -61,7 +61,7 @@ func (s *stubFetcher) failWith(err error) {
 	s.mu.Unlock()
 }
 
-func (s *stubFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (s *stubFetcher) Fetch(_ context.Context, req core.Request) (*core.Response, error) {
 	s.mu.Lock()
 	s.seen = append(s.seen, req)
 	s.mu.Unlock()
@@ -76,16 +76,16 @@ func (s *stubFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Resp
 	return statusResp(404, fmt.Sprintf(`{"status":-1,"message":"stubFetcher: no route for %s"}`, req.URL)), nil
 }
 
-func (s *stubFetcher) requests() []capkit.Request {
+func (s *stubFetcher) requests() []core.Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]capkit.Request, len(s.seen))
+	out := make([]core.Request, len(s.seen))
 	copy(out, s.seen)
 	return out
 }
 
 // last 返回最近一次请求，用于断言 URL / 头 / 体。
-func (s *stubFetcher) last(t *testing.T) capkit.Request {
+func (s *stubFetcher) last(t *testing.T) core.Request {
 	t.Helper()
 	reqs := s.requests()
 	if len(reqs) == 0 {
@@ -95,7 +95,7 @@ func (s *stubFetcher) last(t *testing.T) capkit.Request {
 }
 
 // routeFor 按 URL 子串找一条已记录请求。
-func (s *stubFetcher) routeFor(t *testing.T, sub string) capkit.Request {
+func (s *stubFetcher) routeFor(t *testing.T, sub string) core.Request {
 	t.Helper()
 	for _, req := range s.requests() {
 		if strings.Contains(req.URL, sub) {
@@ -103,7 +103,7 @@ func (s *stubFetcher) routeFor(t *testing.T, sub string) capkit.Request {
 		}
 	}
 	t.Fatalf("stubFetcher: 没有匹配 %q 的请求", sub)
-	return capkit.Request{}
+	return core.Request{}
 }
 
 // countFor 统计匹配 URL 子串的请求次数。

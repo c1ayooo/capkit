@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/runtime"
 )
 
@@ -25,9 +25,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"manifests": h.rt.Manifests()})
 	case r.Method == http.MethodPost && r.URL.Path == "/call":
 		var req struct {
-			Tool    string             `json:"tool"`
-			Input   json.RawMessage    `json:"input"`
-			Context capkit.CallContext `json:"context"`
+			Tool    string           `json:"tool"`
+			Input   json.RawMessage  `json:"input"`
+			Context core.CallContext `json:"context"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

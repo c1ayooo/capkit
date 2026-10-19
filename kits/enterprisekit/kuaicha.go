@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/tidwall/gjson"
 )
 
@@ -19,7 +19,7 @@ type kuaichaProvider struct {
 
 const kcBase = "https://www.kuaicha365.com"
 
-func NewKuaichaProvider(fetcher capkit.Fetcher, cookie string, proxyURL string) (Provider, error) {
+func NewKuaichaProvider(fetcher core.Fetcher, cookie string, proxyURL string) (Provider, error) {
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
 		return nil, SessionMissing("快查会话未配置：请在企业数据源中填写 Cookie")

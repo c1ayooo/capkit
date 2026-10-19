@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/tidwall/gjson"
 )
 
@@ -20,7 +20,7 @@ type aqcProvider struct {
 
 const aqcBase = "https://aiqicha.baidu.com"
 
-func NewAqcProvider(fetcher capkit.Fetcher, cookie string, proxyURL string) (Provider, error) {
+func NewAqcProvider(fetcher core.Fetcher, cookie string, proxyURL string) (Provider, error) {
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
 		return nil, SessionMissing("爱企查会话未配置：请在企业数据源中填写 Cookie")

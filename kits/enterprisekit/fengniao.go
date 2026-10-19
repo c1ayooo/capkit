@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/tidwall/gjson"
 )
 
@@ -25,7 +25,7 @@ type fengniaoProvider struct {
 const fnBase = "https://www.riskbird.com"
 
 // NewFengniaoProvider 使用手动粘贴的网页 Cookie（原路径，向后兼容）。
-func NewFengniaoProvider(fetcher capkit.Fetcher, cookie string, proxyURL string) (Provider, error) {
+func NewFengniaoProvider(fetcher core.Fetcher, cookie string, proxyURL string) (Provider, error) {
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
 		return nil, SessionMissing("风鸟会话未配置：请在企业数据源中填写 Cookie")
@@ -45,7 +45,7 @@ func NewFengniaoProvider(fetcher capkit.Fetcher, cookie string, proxyURL string)
 // 参数 {"mobile":手机号,"password":明文密码,"type":"password"}（前端未加密、密码登录
 // 路径无图形验证码——实测假密码直接返回业务错误 8888，不弹验证码）。
 // 登录成功后收集 Set-Cookie 作为会话（与手动粘贴 Cookie 等价）。
-func NewFengniaoAccountProvider(fetcher capkit.Fetcher, mobile, password, proxyURL string) (Provider, error) {
+func NewFengniaoAccountProvider(fetcher core.Fetcher, mobile, password, proxyURL string) (Provider, error) {
 	mobile = strings.TrimSpace(mobile)
 	if mobile == "" || password == "" {
 		return nil, SessionMissing("风鸟会话未配置：请在企业数据源中填写账号与密码")

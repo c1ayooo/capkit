@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/tidwall/gjson"
 )
 
@@ -46,16 +46,16 @@ const (
 
 const hexDigits = "0123456789abcdef"
 
-// Client 是 MIIT beian 上游的协议客户端。所有出站请求都经 capkit.Fetcher，
+// Client 是 MIIT beian 上游的协议客户端。所有出站请求都经 core.Fetcher，
 // 因此代理/超时/限速/审计由宿主统一实施。
 type Client struct {
-	fetcher capkit.Fetcher
+	fetcher core.Fetcher
 	proxy   string
 	timeout time.Duration
 }
 
 // NewClient 构造客户端。timeout<=0 时取 20s（验证码链路请求较多，略放宽）。
-func NewClient(fetcher capkit.Fetcher) *Client {
+func NewClient(fetcher core.Fetcher) *Client {
 	return &Client{fetcher: fetcher, timeout: 20 * time.Second}
 }
 
@@ -79,7 +79,7 @@ func baseHeaders() map[string]string {
 
 func (c *Client) post(ctx context.Context, url string, headers map[string]string, body []byte, contentType string) (string, error) {
 	if c == nil || c.fetcher == nil {
-		return "", capkit.Unavailable("icpkit: fetcher 端口未配置")
+		return "", core.Unavailable("icpkit: fetcher 端口未配置")
 	}
 	h := make(map[string]string, len(headers)+1)
 	for k, v := range headers {
@@ -88,18 +88,18 @@ func (c *Client) post(ctx context.Context, url string, headers map[string]string
 	if contentType != "" {
 		h["Content-Type"] = contentType
 	}
-	resp, err := c.fetcher.Fetch(ctx, capkit.Request{
+	resp, err := c.fetcher.Fetch(ctx, core.Request{
 		Method: "POST", URL: url, Headers: h, Body: body, Proxy: c.proxy, Timeout: c.timeout,
 	})
 	if err != nil {
 		return "", err
 	}
 	if resp.Status != 200 {
-		return "", capkit.Unavailable(fmt.Sprintf("beian 上游返回 HTTP %d", resp.Status))
+		return "", core.Unavailable(fmt.Sprintf("beian 上游返回 HTTP %d", resp.Status))
 	}
 	text := string(resp.Body)
 	if strings.Contains(text, wafBlocked) {
-		return "", capkit.Unavailable("当前访问已被创宇盾拦截，请稍后重试或更换出口 IP")
+		return "", core.Unavailable("当前访问已被创宇盾拦截，请稍后重试或更换出口 IP")
 	}
 	if len(text) > bodyLimit {
 		text = text[:bodyLimit]
@@ -123,7 +123,7 @@ func (c *Client) authToken(ctx context.Context) (string, map[string]string, erro
 	}
 	token := gjson.Get(text, "params.bussiness").String()
 	if token == "" {
-		return "", nil, capkit.Unavailable("beian auth 响应缺少 token: " + truncate(text, 200))
+		return "", nil, core.Unavailable("beian auth 响应缺少 token: " + truncate(text, 200))
 	}
 	headers["token"] = token
 	return token, headers, nil
@@ -194,7 +194,7 @@ func (c *Client) auth(ctx context.Context) (uuid, token, sign string, headers ma
 func (c *Client) Query(ctx context.Context, name, qtype string, page, size int) (string, error) {
 	meta, ok := typeTable[qtype]
 	if !ok || meta.Black {
-		return "", capkit.InvalidInput("不是普通备案查询类型: " + qtype)
+		return "", core.InvalidInput("不是普通备案查询类型: " + qtype)
 	}
 	uuid, _, sign, headers, err := c.auth(ctx)
 	if err != nil {
@@ -225,7 +225,7 @@ func (c *Client) Query(ctx context.Context, name, qtype string, page, size int) 
 func (c *Client) QueryBlack(ctx context.Context, name, qtype string) (string, error) {
 	meta, ok := typeTable[qtype]
 	if !ok || !meta.Black {
-		return "", capkit.InvalidInput("不是黑名单查询类型: " + qtype)
+		return "", core.InvalidInput("不是黑名单查询类型: " + qtype)
 	}
 	uuid, _, _, headers, err := c.auth(ctx)
 	if err != nil {

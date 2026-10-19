@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeDoer struct {
-	resp *capkit.Response
-	last capkit.Request
+	resp *core.Response
+	last core.Request
 }
 
-func (f *fakeDoer) Do(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f *fakeDoer) Do(_ context.Context, req core.Request) (*core.Response, error) {
 	f.last = req
 	return f.resp, nil
 }
@@ -27,11 +27,11 @@ func TestEngineExecute(t *testing.T) {
 	  ],
 	  "extract":[{"name":"err","regex":"SQL syntax.*"}]
 	}`)
-	doer := &fakeDoer{resp: &capkit.Response{Status: 200, Body: []byte("SQL syntax error near 'x'")}}
+	doer := &fakeDoer{resp: &core.Response{Status: 200, Body: []byte("SQL syntax error near 'x'")}}
 	kit := &Kit{HTTP: doer}
-	res, err := kit.Execute(context.Background(), []capkit.TemplateRef{{
+	res, err := kit.Execute(context.Background(), []core.TemplateRef{{
 		ID: "t1", Kind: "http", Artifact: artifact,
-	}}, capkit.Target{Kind: capkit.TargetURL, URL: "http://127.0.0.1:8080"}, nil)
+	}}, core.Target{Kind: core.TargetURL, URL: "http://127.0.0.1:8080"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

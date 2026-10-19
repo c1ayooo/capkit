@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/runtime"
 )
@@ -35,13 +35,13 @@ func TestEnvelopeInvariants(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, audit := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 7, Actor: "tester"})
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 7, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +49,11 @@ func TestEnvelopeInvariants(t *testing.T) {
 	if !res.Status.Valid() {
 		t.Fatalf("status = %q", res.Status)
 	}
-	if res.Status != capkit.StatusSuccess || !res.OK {
+	if res.Status != core.StatusSuccess || !res.OK {
 		t.Fatalf("status/ok = %q/%v", res.Status, res.OK)
 	}
 	// Summary is non-empty and bounded.
-	if res.Summary == "" || len([]rune(res.Summary)) > capkit.MaxSummaryRunes {
+	if res.Summary == "" || len([]rune(res.Summary)) > core.MaxSummaryRunes {
 		t.Fatalf("summary = %q", res.Summary)
 	}
 	// Meta is fully populated.
@@ -67,7 +67,7 @@ func TestEnvelopeInvariants(t *testing.T) {
 		t.Fatal("gate trace is empty; agent cannot see why a call was slow")
 	}
 	// Data stays within the ceiling.
-	if len(res.Data) > capkit.MaxDataBytes {
+	if len(res.Data) > core.MaxDataBytes {
 		t.Fatalf("data = %d bytes", len(res.Data))
 	}
 	if len(audit.Events()) < 2 {
@@ -81,20 +81,20 @@ func TestDataCeilingIsEnforced(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 7})
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 7})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Truncated {
 		t.Fatal("expected truncated=true on oversized data")
 	}
-	if len(res.Data) > capkit.MaxDataBytes {
+	if len(res.Data) > core.MaxDataBytes {
 		t.Fatalf("clamped data = %d bytes", len(res.Data))
 	}
 	var data map[string]any
@@ -114,24 +114,24 @@ func TestDataCeilingIsEnforced(t *testing.T) {
 }
 
 func TestBlockedResultMapsStatus(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": "http://example.com/"})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 1})
 	if err == nil {
 		t.Fatal("expected scope denial")
 	}
-	if res.Status != capkit.StatusBlocked {
+	if res.Status != core.StatusBlocked {
 		t.Fatalf("status = %q, want blocked", res.Status)
 	}
 	if res.OK {
 		t.Fatal("blocked result must not be ok")
 	}
-	var e *capkit.Error
-	if res.Error == nil || res.Error.Code != capkit.CodeScopeDenied {
+	var e *core.Error
+	if res.Error == nil || res.Error.Code != core.CodeScopeDenied {
 		t.Fatalf("error = %+v", res.Error)
 	}
 	// scope_denied is never retryable: the agent must not loop on it.
@@ -145,16 +145,16 @@ func TestBlockedResultMapsStatus(t *testing.T) {
 }
 
 func TestUnknownToolStillReturnsEnvelope(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
-	res, err := rt.Call(context.Background(), "nope", json.RawMessage(`{}`), capkit.CallContext{})
+	res, err := rt.Call(context.Background(), "nope", json.RawMessage(`{}`), core.CallContext{})
 	if err == nil {
 		t.Fatal("expected not found")
 	}
-	if res.Status != capkit.StatusFailed {
+	if res.Status != core.StatusFailed {
 		t.Fatalf("status = %q", res.Status)
 	}
 	if res.Meta.Tool != "nope" {
@@ -173,7 +173,7 @@ func TestIdempotentRetryReturnsCachedResult(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestIdempotentRetryReturnsCachedResult(t *testing.T) {
 	}
 
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	cc := capkit.CallContext{ProjectID: 3, Actor: "retry-bot", TaskID: "t1"}
+	cc := core.CallContext{ProjectID: 3, Actor: "retry-bot", TaskID: "t1"}
 	first, err := rt.Call(context.Background(), "http_probe", input, cc)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestDifferentInputIsNotCached(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestDifferentInputIsNotCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cc := capkit.CallContext{ProjectID: 3, Actor: "retry-bot", TaskID: "t1"}
+	cc := core.CallContext{ProjectID: 3, Actor: "retry-bot", TaskID: "t1"}
 	first, _ := json.Marshal(map[string]any{"url": srv.URL + "/a"})
 	second, _ := json.Marshal(map[string]any{"url": srv.URL + "/b"})
 	r1, err := rt.Call(context.Background(), "http_probe", first, cc)

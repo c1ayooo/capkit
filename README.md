@@ -156,7 +156,7 @@ Go 语言的渗透能力实现库，附一套宿主契约参考。宿主实现�
 ### 2.1 最小接线
 
 ```go
-reg := capkit.NewRegistry()
+reg := core.NewRegistry()
 if err := all.RegisterHTTP(reg); err != nil { /* ... */ }
 
 limiter := gates.NewLimiter()
@@ -166,10 +166,10 @@ httpClient := httpx.New(myScope, limiter, audit)
 rt, err := runtime.New(runtime.Config{
     Scope: myScope, Approval: myApproval, Limiter: limiter, Audit: audit,
     HTTP: httpClient, Settings: mySettings, Sealer: mySealer,
-    RequireApprovalAt: capkit.RiskHigh,
+    RequireApprovalAt: core.RiskHigh,
 }, reg)
 
-res, err := rt.Call(ctx, "http_probe", input, capkit.CallContext{
+res, err := rt.Call(ctx, "http_probe", input, core.CallContext{
     ProjectID: 1, Actor: "operator", TaskID: "t-001",
 })
 ```
@@ -226,13 +226,13 @@ http.ListenAndServe(":8080", httpapi.New(rt))
 **第 2 步：定义 Manifest**
 
 ```go
-func (c *Capability) Manifest() capkit.Manifest {
-    return capkit.Manifest{
+func (c *Capability) Manifest() core.Manifest {
+    return core.Manifest{
         Name:       "mykit",
         Version:    "1.0.0",
         APIVersion: "v1",
         Requires:   []string{"http"}, // 声明依赖的端口，runtime 会校验
-        Tools: []capkit.ToolSpec{
+        Tools: []core.ToolSpec{
             {
                 Name:        "my_probe",
                 Description: "对目标做某某探测，返回状态与关键字段",
@@ -241,14 +241,14 @@ func (c *Capability) Manifest() capkit.Manifest {
                     "properties": {"target": {"type": "string"}},
                     "required": ["target"]
                 }`),
-                Risk:      capkit.RiskLow,
-                RateLimit: capkit.RateLimitSpec{PerHostPerMinute: 60},
-                ExtractTargets: func(in json.RawMessage) ([]capkit.Target, error) {
+                Risk:      core.RiskLow,
+                RateLimit: core.RateLimitSpec{PerHostPerMinute: 60},
+                ExtractTargets: func(in json.RawMessage) ([]core.Target, error) {
                     var v struct{ Target string `json:"target"` }
                     if err := json.Unmarshal(in, &v); err != nil {
                         return nil, err
                     }
-                    return []capkit.Target{capkit.TargetFromString(v.Target)}, nil
+                    return []core.Target{core.TargetFromString(v.Target)}, nil
                 },
             },
         },
@@ -259,33 +259,33 @@ func (c *Capability) Manifest() capkit.Manifest {
 **第 3 步：实现 Call**
 
 ```go
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
     switch call.Tool {
     case "my_probe":
         var in struct{ Target string `json:"target"` }
         if err := json.Unmarshal(call.Input, &in); err != nil {
-            return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+            return core.FailResult(core.InvalidInput(err.Error())), nil
         }
-        resp, err := c.http.Do(ctx, capkit.Request{Method: "GET", URL: "https://" + in.Target})
+        resp, err := c.http.Do(ctx, core.Request{Method: "GET", URL: "https://" + in.Target})
         if err != nil {
-            return capkit.FailResult(capkit.Unavailable(err.Error())), nil
+            return core.FailResult(core.Unavailable(err.Error())), nil
         }
-        id, _ := c.evidence.Record(ctx, capkit.Evidence{
+        id, _ := c.evidence.Record(ctx, core.Evidence{
             Kind:     "http_exchange",
-            Target:   capkit.TargetFromString(in.Target),
+            Target:   core.TargetFromString(in.Target),
             Response: resp.Body,
             CreatedAt: time.Now(),
         })
-        return capkit.Result{
+        return core.Result{
             OK:     true,
-            Status: capkit.StatusSuccess,
-            Summary: capkit.ClampSummary(fmt.Sprintf("对 %s 探测，HTTP %d，%d 字节",
+            Status: core.StatusSuccess,
+            Summary: core.ClampSummary(fmt.Sprintf("对 %s 探测，HTTP %d，%d 字节",
                 in.Target, resp.Status, len(resp.Body))),
             Data:     mustJSON(map[string]any{"status": resp.Status}),
-            Evidence: []capkit.EvidenceRef{capkit.NewEvidenceRef(id, "http_exchange", resp.Body)},
+            Evidence: []core.EvidenceRef{core.NewEvidenceRef(id, "http_exchange", resp.Body)},
         }, nil
     }
-    return capkit.FailResult(capkit.NotFound(call.Tool)), nil
+    return core.FailResult(core.NotFound(call.Tool)), nil
 }
 ```
 
@@ -346,11 +346,11 @@ type Tunneler   interface{ Tunnel(ctx context.Context, spec TunnelSpec) (Tunnel,
 GPL/AGPL 的工具只能这样接，不能 import 代码：
 
 ```go
-res, err := c.proc.Run(ctx, capkit.ProcessSpec{
+res, err := c.proc.Run(ctx, core.ProcessSpec{
     Path:    "nmap",
     Args:    []string{"-sV", "-p", ports, host},
     Timeout: 5 * time.Minute,
-    Targets: []capkit.Target{capkit.TargetFromString(host)},
+    Targets: []core.Target{core.TargetFromString(host)},
 })
 ```
 
@@ -441,7 +441,7 @@ go test ./...
 ## 六、目录
 
 ```
-capkit.go / port.go / manifest.go / registry.go   根包契约
+core.go / port.go / manifest.go / registry.go   根包契约
 gates/        授权、审批、按主机限速、审计链
 runtime/      从注册表构建能力，调用经过门禁
 adapters/     httpx（带门禁的 HTTP）、exec、sealer

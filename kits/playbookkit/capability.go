@@ -8,32 +8,32 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Capability exposes deterministic playbook execution as an agent tool. Scripts
 // live in the host; this tool loads and runs one by ID, enforcing scope per
 // step and returning a structured verdict.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 }
 
 // NewCapability builds the playbook capability.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // Manifest declares the playbook tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "playbookkit", Version: "0.2.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "http"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "playbook_run",
 				Description: "确定性执行一条剧本：步骤严格串行、断言失败即停、重定向限同 host。按 ID 加载预设或按 path 加载宿主脚本，返回 verdict/evidence。host 变量必填，scope 每步校验。",
-				Risk:        capkit.RiskHigh,
-				RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
+				Risk:        core.RiskHigh,
+				RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
 				InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -53,7 +53,7 @@ func Manifest() capkit.Manifest {
     "requests":{"type":"integer"}
   }
 }`),
-				ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+				ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 					var in struct {
 						Vars map[string]string `json:"vars"`
 					}
@@ -64,17 +64,17 @@ func Manifest() capkit.Manifest {
 					if host == "" {
 						return nil, fmt.Errorf("vars.host 必填")
 					}
-					t, err := capkit.TargetFromString(0, host)
+					t, err := core.TargetFromString(0, host)
 					if err != nil {
 						return nil, err
 					}
-					return []capkit.Target{t}, nil
+					return []core.Target{t}, nil
 				},
 			},
 			{
 				Name:        "playbook_list",
 				Description: "列出已加载的内置预设剧本（ID/名称/描述/所需变量）。只读，不执行。",
-				Risk:        capkit.RiskLow,
+				Risk:        core.RiskLow,
 				InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
 				OutputSchema: json.RawMessage(`{
   "type":"object",
@@ -85,25 +85,25 @@ func Manifest() capkit.Manifest {
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the playbook tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "playbook_run":
 		return c.run(ctx, call)
 	case "playbook_list":
 		return c.list(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) list(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) list(ctx context.Context, call core.Call) (core.Result, error) {
 	presets, errs := EmbeddedPresets()
 	if len(errs) > 0 && len(presets) == 0 {
-		return capkit.FailResult(capkit.Unavailable(fmt.Sprintf("%d 个预设剧本加载失败", len(errs)))), nil
+		return core.FailResult(core.Unavailable(fmt.Sprintf("%d 个预设剧本加载失败", len(errs)))), nil
 	}
 	out := make([]map[string]any, 0, len(presets))
 	for id, pb := range presets {
@@ -111,16 +111,16 @@ func (c *Capability) list(ctx context.Context, call capkit.Call) (capkit.Result,
 			"id": id, "name": pb.Name, "description": pb.Note, "requires_vars": pb.VarsRequired,
 		})
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("已加载 %d 条预设剧本", len(out)), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("已加载 %d 条预设剧本", len(out)), map[string]any{
 		"count": len(out), "playbooks": out,
 	})
 	if len(errs) > 0 {
-		res.Summary = capkit.ClampSummary(res.Summary + "（有 " + fmt.Sprintf("%d", len(errs)) + " 个解析错误）")
+		res.Summary = core.ClampSummary(res.Summary + "（有 " + fmt.Sprintf("%d", len(errs)) + " 个解析错误）")
 	}
 	return res, nil
 }
 
-func (c *Capability) run(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) run(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		ID        string            `json:"id"`
 		Path      string            `json:"path"`
@@ -129,7 +129,7 @@ func (c *Capability) run(ctx context.Context, call capkit.Call) (capkit.Result, 
 		TimeoutMS int               `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	var pb *Playbook
 	var loadErr error
@@ -147,14 +147,14 @@ func (c *Capability) run(ctx context.Context, call capkit.Call) (capkit.Result, 
 	case strings.TrimSpace(in.Path) != "":
 		raw, rerr := os.ReadFile(in.Path)
 		if rerr != nil {
-			return capkit.FailResult(capkit.InvalidInput("读取剧本失败: " + rerr.Error())), nil
+			return core.FailResult(core.InvalidInput("读取剧本失败: " + rerr.Error())), nil
 		}
 		pb, loadErr = LoadPlaybookFromBytes(raw)
 	default:
-		return capkit.FailResult(capkit.InvalidInput("id 或 path 必填其一")), nil
+		return core.FailResult(core.InvalidInput("id 或 path 必填其一")), nil
 	}
 	if loadErr != nil {
-		return capkit.FailResult(capkit.InvalidInput(loadErr.Error())), nil
+		return core.FailResult(core.InvalidInput(loadErr.Error())), nil
 	}
 	opts := RunOptions{
 		Vars:    in.Vars,
@@ -164,9 +164,9 @@ func (c *Capability) run(ctx context.Context, call capkit.Call) (capkit.Result, 
 	}
 	rr, err := Run(ctx, pb, opts)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
-	res, _ := capkit.DataResult(rr)
-	res.Summary = capkit.ClampSummary("剧本 " + pb.ID + " 结论 " + rr.Verdict + "：" + rr.Reason)
+	res, _ := core.DataResult(rr)
+	res.Summary = core.ClampSummary("剧本 " + pb.ID + " 结论 " + rr.Verdict + "：" + rr.Reason)
 	return res, nil
 }

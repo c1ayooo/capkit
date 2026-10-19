@@ -5,7 +5,7 @@
 // App/MiniApp/快应用 detail fan-out.
 //
 // Like oastkit, MIIT is an external data source rather than a project target:
-// the kit talks to it through capkit.Fetcher, so the host still applies proxy,
+// the kit talks to it through core.Fetcher, so the host still applies proxy,
 // timeout, rate limit and audit policy, but not project target scope.
 package icpkit
 
@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // kitVersion is the manifest version Normalize stamps into Result.Meta.Version.
@@ -25,12 +25,12 @@ const kitVersion = "0.1.0"
 // Kit exposes the MIIT beian lookup as a capkit capability.
 type Kit struct {
 	client   *Client
-	evidence capkit.EvidenceSink
+	evidence core.EvidenceSink
 }
 
 // New builds the kit from host ports. It never stores credentials: the MIIT
 // API needs none, only a transient token obtained per call.
-func New(deps capkit.Deps) *Kit {
+func New(deps core.Deps) *Kit {
 	return &Kit{
 		client:   NewClient(deps.Fetcher),
 		evidence: deps.Evidence,
@@ -38,7 +38,7 @@ func New(deps capkit.Deps) *Kit {
 }
 
 // NewCapability adapts New to the capkit constructor signature.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	if deps.Fetcher == nil {
 		return nil, fmt.Errorf("icpkit: 需要 fetcher 端口")
 	}
@@ -50,12 +50,12 @@ func (k *Kit) Client() *Client { return k.client }
 
 // Manifest declares the tool surface. MIIT is not a project target, so no tool
 // extracts targets; the lookup key is carried in the query result instead.
-func (k *Kit) Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func (k *Kit) Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "icpkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"fetcher"},
-		Tools: []capkit.ToolSpec{
-			mustTool(capkit.ToolSpec{
+		Tools: []core.ToolSpec{
+			mustTool(core.ToolSpec{
 				Name: "icp_query",
 				Description: "查询工信部 ICP 备案（beian.miit.gov.cn）：按单位名称/域名检索网站、App、小程序、快应用的备案信息，" +
 					"或查询黑名单（违法违规）备案。type 取值：web(网站，默认)|app(App)|mapp(小程序)|kapp(快应用)，" +
@@ -71,24 +71,24 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["query"]
 }`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"},"records":{"type":"array","items":{"type":"object"}}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			}),
-			mustTool(capkit.ToolSpec{
+			mustTool(core.ToolSpec{
 				Name:           "icp_types",
 				Description:    "列出 icp_query 支持的查询类型（普通备案 / 黑名单）及其含义。",
 				InputSchema:    json.RawMessage(`{"type":"object","properties":{}}`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"types":{"type":"array","items":{"type":"object"}}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			}),
 		},
 	}
 }
 
 // mustTool fills a default empty input schema and returns the spec.
-func mustTool(t capkit.ToolSpec) capkit.ToolSpec {
+func mustTool(t core.ToolSpec) core.ToolSpec {
 	if len(t.InputSchema) == 0 {
 		t.InputSchema = json.RawMessage(`{"type":"object"}`)
 	}
@@ -98,25 +98,25 @@ func mustTool(t capkit.ToolSpec) capkit.ToolSpec {
 // Call routes one tool invocation. It is a thin envelope shell: dispatch does
 // the work, then Normalize completes Status/OK/Meta.Tool/Meta.Version and clamps
 // Summary, so every return path — happy or error — carries the same envelope.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "icp_query":
 		return k.query(ctx, call.Input)
 	case "icp_types":
 		catalog := TypeCatalog()
-		return capkit.SuccessResult(
+		return core.SuccessResult(
 			fmt.Sprintf("返回 %d 种 ICP 主体类型", len(catalog)), catalog)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
+func (k *Kit) query(ctx context.Context, input json.RawMessage) (core.Result, error) {
 	var in struct {
 		Query string `json:"query"`
 		Type  string `json:"type"`
@@ -124,18 +124,18 @@ func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, 
 		Size  int    `json:"size"`
 	}
 	if err := json.Unmarshal(input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput("请求参数不是合法 JSON: " + err.Error())), nil
+		return core.FailResult(core.InvalidInput("请求参数不是合法 JSON: " + err.Error())), nil
 	}
 	name := strings.TrimSpace(in.Query)
 	if name == "" {
-		return capkit.FailResult(capkit.InvalidInput("query 不能为空")), nil
+		return core.FailResult(core.InvalidInput("query 不能为空")), nil
 	}
 	qtype := strings.ToLower(strings.TrimSpace(in.Type))
 	if qtype == "" {
 		qtype = TypeWeb
 	}
 	if !IsSupportedType(qtype) {
-		return capkit.FailResult(capkit.InvalidInput("不支持的查询类型: " + qtype)), nil
+		return core.FailResult(core.InvalidInput("不支持的查询类型: " + qtype)), nil
 	}
 
 	var (
@@ -155,13 +155,13 @@ func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, 
 		raw, err = k.client.Query(ctx, name, qtype, page, size)
 	}
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 
 	var parsed any
 	if uerr := json.Unmarshal([]byte(raw), &parsed); uerr != nil {
 		// 上游返回非 JSON（例如网关 HTML），原样透出便于排查。
-		return capkit.FailResult(capkit.Unavailable("上游响应不是合法 JSON")), nil
+		return core.FailResult(core.Unavailable("上游响应不是合法 JSON")), nil
 	}
 
 	out := map[string]any{
@@ -173,13 +173,13 @@ func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, 
 		out["count"] = n
 	}
 
-	res, rerr := capkit.SuccessResult(summarizeQuery(name, qtype, parsed), out)
+	res, rerr := core.SuccessResult(summarizeQuery(name, qtype, parsed), out)
 	if rerr != nil {
-		return capkit.FailResult(rerr), nil
+		return core.FailResult(rerr), nil
 	}
 	if k.evidence != nil {
 		if blob, merr := json.Marshal(parsed); merr == nil {
-			id, eerr := k.evidence.Record(ctx, capkit.Evidence{
+			id, eerr := k.evidence.Record(ctx, core.Evidence{
 				Kind:      "icp",
 				Title:     fmt.Sprintf("ICP 备案查询 %s (%s)", name, qtype),
 				Data:      blob,

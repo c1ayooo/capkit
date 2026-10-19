@@ -79,7 +79,7 @@
 
 • `Fetcher` 端口：外部规则、情报、搜索下载，带限速与审计，不受项目目标域约束
 • 长任务：任何工具输入可设 `"async": true`；运行时仍同步跑完门禁（授权被拒立刻返回，不是靠轮询），然后返回 `StatusPartial` 并在 `Data` 里给 `JobRef`。运行时自带的 `job_status` 工具负责轮询并最终返回该工具自己的信封
-• 列表输出：可能超过 100 行的列表类工具接受 `cursor`，通过 `capkit.PageWindow` 返回 `Page{Total, Cursor, HasMore}`，让 agent 翻页而不是丢行
+• 列表输出：可能超过 100 行的列表类工具接受 `cursor`，通过 `core.PageWindow` 返回 `Page{Total, Cursor, HasMore}`，让 agent 翻页而不是丢行
 • `.github/workflows/ci.yml`：gofmt、测试、vet、覆盖率（无 kit 0%）、import 边界、五个示例实跑
 
 ## shellkit 子包（同一 module，需显式 import）
@@ -102,13 +102,13 @@
 ## 已知与规格的差距
 
 • **privesckit 只做识别与建议。** 规格 4.6 / P2.1 也提到利用，本模块停在枚举加候选排序，遵守规格自己在 4.12 / 9.2 划的界线（识别与决策进 capkit，成品载荷不进内核）。提权 payload 留在宿主侧或私有层
-• **部分列表工具还没分页。** `inet_portscan` 与 `github_secret_search` 支持 `cursor`；其余列表类工具（dnslog 记录、测绘命中、dork 模板）当前返回有界集合，只置 `Truncated` 标记。`capkit.PageWindow` 是给任何超过 100 行的工具准备的辅助函数
+• **部分列表工具还没分页。** `inet_portscan` 与 `github_secret_search` 支持 `cursor`；其余列表类工具（dnslog 记录、测绘命中、dork 模板）当前返回有界集合，只置 `Truncated` 标记。`core.PageWindow` 是给任何超过 100 行的工具准备的辅助函数
 • **`session_exec` 把截断后的 stdout 放在 `Data` 里。** 若严格执行“响应正文只进证据”的规则，agent 就看不到命令输出。折中方案：受运行时 8KB 上限约束，同时始终附带完整文本的 `EvidenceRef`
 • **`Result.Text`、`EvidenceIDs` 与四个额外错误码**（`not_found`、`conflict`、`unavailable`、`need_human`）是对规格 5.5.1 / 5.5.3 的扩展。`need_human` 是六态 `Status` 必需的；其余保留是因为把它们合并成 `internal` 会误导 agent 去重试本不该重试的调用
 • **四家云未用真实凭据跑过。** `cloudkit` 的四个厂商实现只经过离线假件测试（把 SDK 的 HTTP 客户端换成 `harness` 的 `HTTP`，断言签名头与请求形状），本机没有任何 `CAPKIT_CLOUD_*` 凭据，因此「真实 AK/SK 打真实云 API」这一步**未验证**。这不影响契约：离线测试覆盖工具形状、脱敏、错误分类与分页，但真机上的账号/权限差异（尤其是跨地域 endpoint 与主账号/子账号权限面）仍需一次实测
 • **华为云能力窄于另外三家。** 见上文 `cloudkit` 段：`cloud_storage_list` 与 `cloud_run_command` 返回 `unsupported` 而非伪造实现
 • **`sessionkit` 是契约-only 包。** 按设计不声明工具、不进注册表：它提供 `Session` 契约与四种传输，工具入口在 `shellkit`
-• **`identitykit` 原为契约-only，M2 起改为带工具的包。** ROADMAP M2 任务 1 要求「identitykit 注册成工具」，以其为准，`identitykit/README.md` 原文「契约包，无工具」已同步改写。它仍不在 `RegisterFull` 里——flow registry 是宿主注入的协作者（同 `enterprisekit` 的 resolver），`capkit.Deps` 承载不了，宿主用 `all.RegisterIdentity(reg, flows)` 单独注册
+• **`identitykit` 原为契约-only，M2 起改为带工具的包。** ROADMAP M2 任务 1 要求「identitykit 注册成工具」，以其为准，`identitykit/README.md` 原文「契约包，无工具」已同步改写。它仍不在 `RegisterFull` 里——flow registry 是宿主注入的协作者（同 `enterprisekit` 的 resolver），`core.Deps` 承载不了，宿主用 `all.RegisterIdentity(reg, flows)` 单独注册
 • **四家云仍未用真实凭据跑过。** 见上文 `cloudkit` 段：本机 `CAPKIT_CLOUD_*` 数量为 0，真实 AK/SK 打真实云 API 这一步**未验证**；离线假件测试不等价于真实调用
 • **WebShell 宿主 Executor 契约在 M2 收紧。** `session.ExecResult` 新增 `Encoding` 字段：文件读取只有宿主声明 `"base64"` 才解码，未声明一律原样（原先的嗅探会把 `abcdefgh` 这类纯文本解成垃圾字节）。未声明 base64 的宿主会从「被猜着解码」变成「原样返回」
 
@@ -116,6 +116,6 @@
 
 `all.RegisterFull` 注册全部；`all.RegisterSession`、`all.RegisterPostExploitation`、`all.RegisterContainer`、`all.RegisterLateral` 是拆开的分组，给需要选择性注册的宿主用。
 
-会话类 kit 声明 `sessions` 端口，latkit 声明 `process` 端口。宿主注册它们就必须提供 `capkit.SessionManager` / `capkit.ProcessRunner`，否则 `runtime.New` 会直接失败（fail closed），不会静默降级。
+会话类 kit 声明 `sessions` 端口，latkit 声明 `process` 端口。宿主注册它们就必须提供 `core.SessionManager` / `core.ProcessRunner`，否则 `runtime.New` 会直接失败（fail closed），不会静默降级。
 
-`reconkit`、`enterprisekit` 与 `identitykit` 不在 `RegisterFull` 里：它们需要 `capkit.Deps` 承载不了的宿主协作者（`AssetSink` / provider 集合、`ProviderResolver`、`AuthFlowRegistry`），所以宿主用 `RegisterRecon` / `RegisterEnterprise` / `RegisterIdentity` 单独注册。`webshell_deploy` 同理需要宿主 `WebShellDeployer`，走 `RegisterSessionWithDeployer`。
+`reconkit`、`enterprisekit` 与 `identitykit` 不在 `RegisterFull` 里：它们需要 `core.Deps` 承载不了的宿主协作者（`AssetSink` / provider 集合、`ProviderResolver`、`AuthFlowRegistry`），所以宿主用 `RegisterRecon` / `RegisterEnterprise` / `RegisterIdentity` 单独注册。`webshell_deploy` 同理需要宿主 `WebShellDeployer`，走 `RegisterSessionWithDeployer`。

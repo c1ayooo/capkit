@@ -1,4 +1,4 @@
-package capkit_test
+package core_test
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 	"github.com/c1ayooo/capkit/kits/enterprisekit"
 	"github.com/c1ayooo/capkit/kits/identitykit"
@@ -54,20 +54,20 @@ var genericSummaries = map[string]bool{
 // errorCodes is the fixed enum from docs §5.5.3. A Code outside it is free text
 // and defeats the host's error mapping.
 var errorCodes = map[string]bool{
-	capkit.CodeInvalidInput:        true,
-	capkit.CodeScopeDenied:         true,
-	capkit.CodeApprovalRequired:    true,
-	capkit.CodeNotFound:            true,
-	capkit.CodeConflict:            true,
-	capkit.CodeRateLimited:         true,
-	capkit.CodeUnavailable:         true,
-	capkit.CodeInternal:            true,
-	capkit.CodeNeedHuman:           true,
-	capkit.CodeToolMissing:         true,
-	capkit.CodeTargetUnreachable:   true,
-	capkit.CodeTimeout:             true,
-	capkit.CodeUpstreamError:       true,
-	capkit.CodeEvidenceWriteFailed: true,
+	core.CodeInvalidInput:        true,
+	core.CodeScopeDenied:         true,
+	core.CodeApprovalRequired:    true,
+	core.CodeNotFound:            true,
+	core.CodeConflict:            true,
+	core.CodeRateLimited:         true,
+	core.CodeUnavailable:         true,
+	core.CodeInternal:            true,
+	core.CodeNeedHuman:           true,
+	core.CodeToolMissing:         true,
+	core.CodeTargetUnreachable:   true,
+	core.CodeTimeout:             true,
+	core.CodeUpstreamError:       true,
+	core.CodeEvidenceWriteFailed: true,
 }
 
 // contractCallTimeout bounds one tool call so a tool that ignores its context
@@ -77,7 +77,7 @@ const contractCallTimeout = 15 * time.Second
 // ciTool pairs one registered tool with the capability that owns it.
 type ciTool struct {
 	capability string
-	spec       capkit.ToolSpec
+	spec       core.ToolSpec
 }
 
 // contractRuntime builds the runtime a host would build, wired to harness
@@ -86,14 +86,14 @@ type ciTool struct {
 //
 // RegisterFull is the baseline the gate is specified against. reconkit and
 // enterprisekit are deliberately outside it — both need host-injected
-// collaborators (an AssetSink pipeline, a ProviderResolver) that capkit.Deps
+// collaborators (an AssetSink pipeline, a ProviderResolver) that core.Deps
 // cannot carry — so they are added here through their own helpers. The
 // enterprise resolver reports every provider unconfigured, which still
 // exercises that tool surface on its failure path; its success path is covered
 // by kits/enterprisekit's own envelope test.
 func contractRuntime(t *testing.T) *runtime.Runtime {
 	t.Helper()
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterFull(reg); err != nil {
 		t.Fatalf("RegisterFull: %v", err)
 	}
@@ -131,7 +131,7 @@ func contractRuntime(t *testing.T) *runtime.Runtime {
 type unavailableResolver struct{}
 
 func (unavailableResolver) Resolve(context.Context, string) (enterprisekit.Provider, error) {
-	return nil, capkit.Unavailable("enterprise provider 未配置")
+	return nil, core.Unavailable("enterprise provider 未配置")
 }
 
 // ciTools is every tool the host exposes, including the runtime-owned
@@ -190,19 +190,19 @@ func TestContractEnvelope(t *testing.T) {
 
 // contractCall runs one minimal legal call through the runtime, converting a
 // panic into a failure attributed to the tool that caused it.
-func contractCall(t *testing.T, rt *runtime.Runtime, tool ciTool) capkit.Result {
+func contractCall(t *testing.T, rt *runtime.Runtime, tool ciTool) core.Result {
 	t.Helper()
 	input := harness.MinimalInput(tool.spec.InputSchema)
 	ctx, cancel := context.WithTimeout(context.Background(), contractCallTimeout)
 	defer cancel()
-	res, _ := rt.Call(ctx, tool.spec.Name, input, capkit.CallContext{
+	res, _ := rt.Call(ctx, tool.spec.Name, input, core.CallContext{
 		TraceID: "ci", ProjectID: 1, Actor: "contract-ci",
 	})
 	return res
 }
 
 // checkEnvelope is the contract itself.
-func checkEnvelope(t *testing.T, tool ciTool, res capkit.Result) {
+func checkEnvelope(t *testing.T, tool ciTool, res core.Result) {
 	t.Helper()
 	label := tool.capability + "/" + tool.spec.Name
 
@@ -210,7 +210,7 @@ func checkEnvelope(t *testing.T, tool ciTool, res capkit.Result) {
 	if !res.Status.Valid() {
 		t.Errorf("%s: Status %q is not one of the six states (envelope: %s)", label, res.Status, envelopeJSON(res))
 	}
-	if want := res.Status == capkit.StatusSuccess || res.Status == capkit.StatusPartial; res.OK != want {
+	if want := res.Status == core.StatusSuccess || res.Status == core.StatusPartial; res.OK != want {
 		t.Errorf("%s: OK=%v contradicts Status=%s (want OK=%v)", label, res.OK, res.Status, want)
 	}
 
@@ -223,8 +223,8 @@ func checkEnvelope(t *testing.T, tool ciTool, res capkit.Result) {
 		t.Errorf("%s: Summary is empty (it must name the target, the action and the outcome)", label)
 	case genericSummaries[summary]:
 		t.Errorf("%s: Summary %q is an empty phrase, not a result — the tool must set its own Summary", label, summary)
-	case len([]rune(summary)) > capkit.MaxSummaryRunes:
-		t.Errorf("%s: Summary is %d runes, over the %d limit", label, len([]rune(summary)), capkit.MaxSummaryRunes)
+	case len([]rune(summary)) > core.MaxSummaryRunes:
+		t.Errorf("%s: Summary is %d runes, over the %d limit", label, len([]rune(summary)), core.MaxSummaryRunes)
 	}
 
 	// 3) Meta.Tool must name the tool the agent asked for.
@@ -236,7 +236,7 @@ func checkEnvelope(t *testing.T, tool ciTool, res capkit.Result) {
 	if res.Error != nil && !errorCodes[res.Error.Code] {
 		t.Errorf("%s: Error.Code %q is outside the fixed enum", label, res.Error.Code)
 	}
-	if res.Error != nil && res.Error.Code == capkit.CodeScopeDenied && res.Error.Retryable {
+	if res.Error != nil && res.Error.Code == core.CodeScopeDenied && res.Error.Retryable {
 		t.Errorf("%s: scope_denied must not be retryable", label)
 	}
 
@@ -252,13 +252,13 @@ func checkEnvelope(t *testing.T, tool ciTool, res capkit.Result) {
 
 // envelopeJSON renders a compact envelope for the failure message, so a tool
 // that returns nothing usable is still diagnosable from the test log.
-func envelopeJSON(res capkit.Result) string {
+func envelopeJSON(res core.Result) string {
 	b, err := json.Marshal(struct {
 		OK      bool   `json:"ok"`
 		Status  string `json:"status"`
 		Summary string `json:"summary"`
 		Text    string `json:"text"`
-	}{OK: res.OK, Status: string(res.Status), Summary: res.Summary, Text: capkit.Truncate(res.Text, 120)})
+	}{OK: res.OK, Status: string(res.Status), Summary: res.Summary, Text: core.Truncate(res.Text, 120)})
 	if err != nil {
 		return "<unmarshalable>"
 	}
@@ -272,7 +272,7 @@ func envelopeJSON(res capkit.Result) string {
 // the three identity tools (M2) and is registered through RegisterIdentity with
 // an empty flow registry — the same path a host with no registered site logins
 // takes (pinned in argKitRegistration below).
-var kitRegistration = map[string]func(*capkit.Registry) error{
+var kitRegistration = map[string]func(*core.Registry) error{
 	"httpkit":        all.RegisterHTTP,
 	"nucleikit":      all.RegisterNuclei,
 	"verifykit":      all.RegisterVerify,
@@ -299,11 +299,11 @@ var kitRegistration = map[string]func(*capkit.Registry) error{
 // registry, a resolver that reports everything unconfigured, and a session kit
 // with no delivery channel (which leaves webshell_deploy reporting
 // tool_missing — the honest result for a host that cannot drop a shell).
-var argKitRegistration = map[string]func(*capkit.Registry) error{
-	"identitykit": func(reg *capkit.Registry) error {
+var argKitRegistration = map[string]func(*core.Registry) error{
+	"identitykit": func(reg *core.Registry) error {
 		return all.RegisterIdentity(reg, identitykit.NewAuthFlowRegistry())
 	},
-	"enterprisekit": func(reg *capkit.Registry) error {
+	"enterprisekit": func(reg *core.Registry) error {
 		return all.RegisterEnterprise(reg, unavailableResolver{})
 	},
 }
@@ -317,7 +317,7 @@ var postExploitationKits = []string{"privesckit", "internalnetkit", "persistkit"
 // RegisterFull, and its tools silently never reach an agent.
 func TestEveryKitReachesTheRegistry(t *testing.T) {
 	for name, register := range kitRegistration {
-		reg := capkit.NewRegistry()
+		reg := core.NewRegistry()
 		if err := register(reg); err != nil {
 			t.Errorf("%s: register: %v", name, err)
 			continue
@@ -327,7 +327,7 @@ func TestEveryKitReachesTheRegistry(t *testing.T) {
 		}
 	}
 	for name, register := range argKitRegistration {
-		reg := capkit.NewRegistry()
+		reg := core.NewRegistry()
 		if err := register(reg); err != nil {
 			t.Errorf("%s: register: %v", name, err)
 			continue
@@ -337,7 +337,7 @@ func TestEveryKitReachesTheRegistry(t *testing.T) {
 		}
 	}
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterFull(reg); err != nil {
 		t.Fatalf("RegisterFull: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestEveryKitReachesTheRegistry(t *testing.T) {
 	}
 }
 
-func hasCapability(reg *capkit.Registry, name string) bool {
+func hasCapability(reg *core.Registry, name string) bool {
 	for _, spec := range reg.Specs() {
 		if spec.Manifest.Name == name {
 			return true

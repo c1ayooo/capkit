@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // ProviderKind 上游数据源类型。与 datasource_sessions.provider 一致。
@@ -30,7 +30,7 @@ var Registry = []ProviderKind{
 
 // NewProvider 工厂：按会话 provider 类型构造对应 adapter。
 // cfg 为 datasource vault 中的会话配置（cookie/proxy_url 等）。
-func NewProvider(fetcher capkit.Fetcher, provider string, cfg map[string]string, proxyURL string) (Provider, error) {
+func NewProvider(fetcher core.Fetcher, provider string, cfg map[string]string, proxyURL string) (Provider, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "aqc":
 		return NewAqcProvider(fetcher, cfg["cookie"], effectiveProxy(cfg, proxyURL))

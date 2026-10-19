@@ -9,7 +9,7 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 )
 
@@ -38,7 +38,7 @@ func newHuaweiFakeProvider(fake *harness.HTTP) *huaweiProvider {
 }
 
 // huaweiRequestFor finds the single recorded request whose URL contains fragment.
-func huaweiRequestFor(t *testing.T, fake *harness.HTTP, fragment string) capkit.Request {
+func huaweiRequestFor(t *testing.T, fake *harness.HTTP, fragment string) core.Request {
 	t.Helper()
 	for _, r := range fake.Requests() {
 		if strings.Contains(r.URL, fragment) {
@@ -46,7 +46,7 @@ func huaweiRequestFor(t *testing.T, fake *harness.HTTP, fragment string) capkit.
 		}
 	}
 	t.Fatalf("no recorded request URL contained %q; calls=%v", fragment, huaweiURLs(fake))
-	return capkit.Request{}
+	return core.Request{}
 }
 
 func huaweiURLs(fake *harness.HTTP) []string {
@@ -461,14 +461,14 @@ func TestClassifyHuaweiNil(t *testing.T) {
 // A host gate error (scope denial) must survive classification verbatim, so
 // cloudkit.go's failure() keeps the host's code.
 func TestHuaweiCapkitErrorPassthrough(t *testing.T) {
-	denied := capkit.ScopeDenied("out of scope: ecs.cn-north-4.myhuaweicloud.com")
+	denied := core.ScopeDenied("out of scope: ecs.cn-north-4.myhuaweicloud.com")
 	got := classifyHuawei(denied)
-	var ce *capkit.Error
+	var ce *core.Error
 	if !errors.As(got, &ce) {
-		t.Fatalf("want *capkit.Error passthrough, got %T", got)
+		t.Fatalf("want *core.Error passthrough, got %T", got)
 	}
-	if ce.Code != capkit.CodeScopeDenied {
-		t.Fatalf("code = %q, want %q", ce.Code, capkit.CodeScopeDenied)
+	if ce.Code != core.CodeScopeDenied {
+		t.Fatalf("code = %q, want %q", ce.Code, core.CodeScopeDenied)
 	}
 }
 
@@ -483,12 +483,12 @@ func TestHuaweiUnavailableWithoutDoer(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unavailable error, got nil")
 	}
-	var ce *capkit.Error
+	var ce *core.Error
 	if !errors.As(err, &ce) {
-		t.Fatalf("want *capkit.Error, got %T (%v)", err, err)
+		t.Fatalf("want *core.Error, got %T (%v)", err, err)
 	}
-	if ce.Code != capkit.CodeUnavailable {
-		t.Fatalf("code = %q, want %q", ce.Code, capkit.CodeUnavailable)
+	if ce.Code != core.CodeUnavailable {
+		t.Fatalf("code = %q, want %q", ce.Code, core.CodeUnavailable)
 	}
 }
 

@@ -6,18 +6,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeFetcher struct {
-	responses []*capkit.Response
-	requests  []capkit.Request
+	responses []*core.Response
+	requests  []core.Request
 }
 
-func (f *fakeFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f *fakeFetcher) Fetch(_ context.Context, req core.Request) (*core.Response, error) {
 	f.requests = append(f.requests, req)
 	if len(f.responses) == 0 {
-		return &capkit.Response{Status: 500}, nil
+		return &core.Response{Status: 500}, nil
 	}
 	res := f.responses[0]
 	f.responses = f.responses[1:]
@@ -25,12 +25,12 @@ func (f *fakeFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Resp
 }
 
 func TestOastDomainAndRecords(t *testing.T) {
-	f := &fakeFetcher{responses: []*capkit.Response{
+	f := &fakeFetcher{responses: []*core.Response{
 		{Status: 200, Body: []byte("abc.dnslog.cn"), Headers: map[string][]string{"Set-Cookie": {"PHPSESSID=1"}}},
 		{Status: 200, Body: []byte(`["1.2.3.4","5.6.7.8"]`)},
 	}}
-	kit := New(capkit.Deps{Fetcher: f})
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "oast_get_domain", Input: json.RawMessage(`{}`)})
+	kit := New(core.Deps{Fetcher: f})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "oast_get_domain", Input: json.RawMessage(`{}`)})
 	if err != nil || !res.OK {
 		t.Fatalf("get domain: %v %+v", err, res)
 	}
@@ -40,7 +40,7 @@ func TestOastDomainAndRecords(t *testing.T) {
 	if err := json.Unmarshal(res.Data, &d); err != nil || d.Domain != "abc.dnslog.cn" {
 		t.Fatalf("domain = %+v err=%v", d, err)
 	}
-	res, err = kit.Call(context.Background(), capkit.Call{
+	res, err = kit.Call(context.Background(), core.Call{
 		Tool:  "oast_get_records",
 		Input: json.RawMessage(`{"domain":"abc.dnslog.cn"}`),
 	})
@@ -67,13 +67,13 @@ func TestParseRecordsLines(t *testing.T) {
 }
 
 func TestOastSummaries(t *testing.T) {
-	f := &fakeFetcher{responses: []*capkit.Response{
+	f := &fakeFetcher{responses: []*core.Response{
 		{Status: 200, Body: []byte("abc.dnslog.cn")},
 		{Status: 200, Body: []byte(`["1.2.3.4","5.6.7.8"]`)},
 	}}
-	kit := New(capkit.Deps{Fetcher: f})
+	kit := New(core.Deps{Fetcher: f})
 
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "oast_get_domain", Input: json.RawMessage(`{}`)})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "oast_get_domain", Input: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestOastSummaries(t *testing.T) {
 		t.Fatalf("meta = %+v", res.Meta)
 	}
 
-	res, err = kit.Call(context.Background(), capkit.Call{
+	res, err = kit.Call(context.Background(), core.Call{
 		Tool:  "oast_get_records",
 		Input: json.RawMessage(`{"domain":"abc.dnslog.cn"}`),
 	})

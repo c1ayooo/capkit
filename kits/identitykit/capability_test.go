@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/identitykit"
 )
 
@@ -19,15 +19,15 @@ import (
 type stubFlow struct {
 	kind   string
 	calls  int
-	got    capkit.Credentials
+	got    core.Credentials
 	fail   error
-	ident  capkit.Identity
+	ident  core.Identity
 	labels []string
 }
 
 func (f *stubFlow) Kind() string { return f.kind }
 
-func (f *stubFlow) Login(_ context.Context, creds capkit.Credentials) (capkit.Identity, error) {
+func (f *stubFlow) Login(_ context.Context, creds core.Credentials) (core.Identity, error) {
 	f.calls++
 	f.got = creds
 	if f.fail != nil {
@@ -37,14 +37,14 @@ func (f *stubFlow) Login(_ context.Context, creds capkit.Credentials) (capkit.Id
 }
 
 type stubIdentity struct {
-	scope   capkit.IdentityScope
+	scope   core.IdentityScope
 	headers http.Header
 	err     error
 }
 
 func (s stubIdentity) Headers(context.Context) (http.Header, error) { return s.headers, s.err }
 func (s stubIdentity) Refresh(context.Context) error                { return nil }
-func (s stubIdentity) Scope() capkit.IdentityScope                  { return s.scope }
+func (s stubIdentity) Scope() core.IdentityScope                    { return s.scope }
 
 func loginJSON(t *testing.T, v map[string]any) json.RawMessage {
 	t.Helper()
@@ -55,9 +55,9 @@ func loginJSON(t *testing.T, v map[string]any) json.RawMessage {
 	return b
 }
 
-func callTool(t *testing.T, cap0 capkit.Capability, tool string, input json.RawMessage) capkit.Result {
+func callTool(t *testing.T, cap0 core.Capability, tool string, input json.RawMessage) core.Result {
 	t.Helper()
-	res, err := cap0.Call(context.Background(), capkit.Call{Tool: tool, Input: input})
+	res, err := cap0.Call(context.Background(), core.Call{Tool: tool, Input: input})
 	if err != nil {
 		t.Fatalf("%s returned a transport error: %v", tool, err)
 	}
@@ -95,7 +95,7 @@ func TestRegistryRejectsDuplicateKind(t *testing.T) {
 
 func TestRegistryNormalizesKind(t *testing.T) {
 	reg := identitykit.NewAuthFlowRegistry()
-	if err := reg.RegisterSite("  FORM ", func(context.Context, capkit.Credentials) (capkit.Identity, error) {
+	if err := reg.RegisterSite("  FORM ", func(context.Context, core.Credentials) (core.Identity, error) {
 		return stubIdentity{}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -124,13 +124,13 @@ func TestRegisterFormSiteRequiresTransport(t *testing.T) {
 // nopDoer stands in for the host's gate-aware HTTPDoer.
 type nopDoer struct{}
 
-func (nopDoer) Do(context.Context, capkit.Request) (*capkit.Response, error) {
-	return &capkit.Response{Status: 200}, nil
+func (nopDoer) Do(context.Context, core.Request) (*core.Response, error) {
+	return &core.Response{Status: 200}, nil
 }
 
 // ---- identity_login ----
 
-func newLoginCapability(t *testing.T, flow capkit.AuthFlow) capkit.Capability {
+func newLoginCapability(t *testing.T, flow core.AuthFlow) core.Capability {
 	t.Helper()
 	reg := identitykit.NewAuthFlowRegistry()
 	if flow != nil {
@@ -138,7 +138,7 @@ func newLoginCapability(t *testing.T, flow capkit.AuthFlow) capkit.Capability {
 			t.Fatal(err)
 		}
 	}
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{}, reg)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{}, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func newLoginCapability(t *testing.T, flow capkit.AuthFlow) capkit.Capability {
 
 func TestLoginCallsRegisteredFlow(t *testing.T) {
 	flow := &stubFlow{kind: "form", ident: stubIdentity{
-		scope:   capkit.IdentityScope{User: "alice", Hosts: []string{"127.0.0.1"}, Label: "site-a"},
+		scope:   core.IdentityScope{User: "alice", Hosts: []string{"127.0.0.1"}, Label: "site-a"},
 		headers: http.Header{"Cookie": []string{"sid=abc123"}},
 	}}
 	cap0 := newLoginCapability(t, flow)
@@ -156,7 +156,7 @@ func TestLoginCallsRegisteredFlow(t *testing.T) {
 		"target": "http://127.0.0.1:8080/", "kind": "form",
 		"username": "alice", "password": "pw", "fields": map[string]string{"extra": "1"},
 	}))
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %s (summary %q)", res.Status, res.Summary)
 	}
 	if flow.calls != 1 {
@@ -197,7 +197,7 @@ func TestLoginUnregisteredKindIsToolMissing(t *testing.T) {
 	res := callTool(t, cap0, "identity_login", loginJSON(t, map[string]any{
 		"target": "http://127.0.0.1:8080/", "kind": "form", "username": "a",
 	}))
-	if res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("error = %+v", res.Error)
 	}
 	if !strings.Contains(res.Error.Message, "已注册：无") {
@@ -211,7 +211,7 @@ func TestLoginRejectsBadKindBeforeTouchingCredentials(t *testing.T) {
 	res := callTool(t, cap0, "identity_login", loginJSON(t, map[string]any{
 		"target": "http://127.0.0.1/", "kind": "saml", "username": "a", "password": "p",
 	}))
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("error = %+v", res.Error)
 	}
 	if flow.calls != 0 {
@@ -224,7 +224,7 @@ func TestLoginRequiresSomeCredential(t *testing.T) {
 	res := callTool(t, cap0, "identity_login", loginJSON(t, map[string]any{
 		"target": "http://127.0.0.1/", "kind": "form",
 	}))
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -237,7 +237,7 @@ func TestLoginFailureMessageIsSanitized(t *testing.T) {
 	res := callTool(t, cap0, "identity_login", loginJSON(t, map[string]any{
 		"target": "http://127.0.0.1/", "kind": "form", "username": "a", "password": "hunter2",
 	}))
-	if res.Error == nil || res.Error.Code != capkit.CodeUpstreamError {
+	if res.Error == nil || res.Error.Code != core.CodeUpstreamError {
 		t.Fatalf("error = %+v", res.Error)
 	}
 	if strings.Contains(res.Error.Message, "hunter2") {
@@ -260,7 +260,7 @@ func TestCSRFExtractsHiddenInput(t *testing.T) {
 	res := callTool(t, cap0, "identity_csrf", loginJSON(t, map[string]any{
 		"url": "http://127.0.0.1/login",
 	}))
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %s (summary %q)", res.Status, res.Summary)
 	}
 	var out struct {
@@ -304,12 +304,12 @@ func TestCSRFNamedMissReportsNotFound(t *testing.T) {
 }
 
 func TestCSRFNeedsHTTPDoer(t *testing.T) {
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res := callTool(t, c, "identity_csrf", loginJSON(t, map[string]any{"url": "http://127.0.0.1/"}))
-	if res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -319,7 +319,7 @@ func TestCSRFNeedsHTTPDoer(t *testing.T) {
 func TestTokenCheckNeedsRefreshInsideSkew(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: now}
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{Clock: clock}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{Clock: clock}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestTokenCheckNeedsRefreshInsideSkew(t *testing.T) {
 func TestTokenCheckHealthyTokenNeedsNoRefresh(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: now}
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{Clock: clock}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{Clock: clock}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestTokenCheckHealthyTokenNeedsNoRefresh(t *testing.T) {
 }
 
 func TestTokenCheckNoExpiryNeverRefreshes(t *testing.T) {
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestTokenCheckNoExpiryNeverRefreshes(t *testing.T) {
 func TestTokenCheckExpiredReportsElapsed(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: now}
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{Clock: clock}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{Clock: clock}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,25 +418,25 @@ func TestTokenCheckExpiredReportsElapsed(t *testing.T) {
 }
 
 func TestTokenCheckRejectsBadTimestamp(t *testing.T) {
-	c, err := identitykit.NewCapabilityWithFlows(capkit.Deps{}, nil)
+	c, err := identitykit.NewCapabilityWithFlows(core.Deps{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res := callTool(t, c, "identity_token_check", loginJSON(t, map[string]any{
 		"access_token": "tok", "expires_at": "yesterday",
 	}))
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
 
 func TestUnknownToolIsNotFound(t *testing.T) {
-	c, err := identitykit.NewCapability(capkit.Deps{})
+	c, err := identitykit.NewCapability(core.Deps{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	res := callTool(t, c, "identity_login2", json.RawMessage(`{}`))
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -448,7 +448,7 @@ type fakeClock struct{ now time.Time }
 func (c *fakeClock) Now() time.Time { return c.now }
 
 type testPorts struct {
-	deps     capkit.Deps
+	deps     core.Deps
 	http     *stubHTTP
 	evidence *stubEvidence
 }
@@ -459,7 +459,7 @@ func newPorts(t *testing.T) testPorts {
 	ev := &stubEvidence{}
 	return testPorts{
 		http: h, evidence: ev,
-		deps: capkit.Deps{HTTP: h, Evidence: ev, Clock: &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}},
+		deps: core.Deps{HTTP: h, Evidence: ev, Clock: &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}},
 	}
 }
 
@@ -473,26 +473,26 @@ const loginPage = `<html><body><form method="post">
 type stubHTTP struct {
 	body string
 	err  error
-	last capkit.Request
+	last core.Request
 }
 
-func (s *stubHTTP) Do(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (s *stubHTTP) Do(_ context.Context, req core.Request) (*core.Response, error) {
 	s.last = req
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &capkit.Response{Status: 200, Body: []byte(s.body)}, nil
+	return &core.Response{Status: 200, Body: []byte(s.body)}, nil
 }
 
-func (s *stubHTTP) Fetch(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (s *stubHTTP) Fetch(_ context.Context, req core.Request) (*core.Response, error) {
 	return s.Do(context.Background(), req)
 }
 
-type stubEvidence struct{ records []capkit.Evidence }
+type stubEvidence struct{ records []core.Evidence }
 
-func (s *stubEvidence) Record(_ context.Context, ev capkit.Evidence) (string, error) {
+func (s *stubEvidence) Record(_ context.Context, ev core.Evidence) (string, error) {
 	s.records = append(s.records, ev)
 	return "ev-1", nil
 }
 
-func (s *stubEvidence) Records() []capkit.Evidence { return s.records }
+func (s *stubEvidence) Records() []core.Evidence { return s.records }

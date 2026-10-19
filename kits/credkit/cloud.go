@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Cloud providers supported by AK/SK verification.
@@ -114,7 +114,7 @@ func (k *Kit) Verify(ctx context.Context, provider, accessKeyID, secretKey strin
 
 // ────────────────────────── 阿里云（ACS3 签名）──────────────────────────
 
-func verifyAliyunAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (VerifyResult, error) {
+func verifyAliyunAt(ctx context.Context, f core.Fetcher, base, ak, sk string) (VerifyResult, error) {
 	nonce, err := randomHex(16)
 	if err != nil {
 		return VerifyResult{}, err
@@ -129,7 +129,7 @@ func verifyAliyunAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) 
 	}
 	signature, signedHeaders := acs3Sign(sk, headers, "")
 
-	req := capkit.Request{
+	req := core.Request{
 		Method:  http.MethodPost,
 		URL:     base + "/",
 		Headers: map[string]string{"Accept": "application/json"},
@@ -198,7 +198,7 @@ func acs3Sign(secretKey string, headers map[string]string, body string) (signatu
 
 // ────────────────────────── 腾讯云（TC3-HMAC-SHA256）──────────────────────────
 
-func verifyTencentAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (VerifyResult, error) {
+func verifyTencentAt(ctx context.Context, f core.Fetcher, base, ak, sk string) (VerifyResult, error) {
 	const service = "sts"
 	const body = "{}"
 	now := time.Now().UTC()
@@ -228,7 +228,7 @@ func verifyTencentAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string)
 	kSigning := hmacSHA256(kService, []byte("tc3_request"))
 	signature := hex.EncodeToString(hmacSHA256(kSigning, []byte(stringToSign)))
 
-	req := capkit.Request{
+	req := core.Request{
 		Method: http.MethodPost,
 		URL:    base + "/",
 		Headers: map[string]string{
@@ -292,7 +292,7 @@ type awsErrorXML struct {
 	Message string `xml:"Error>Message"`
 }
 
-func verifyAWSAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (VerifyResult, error) {
+func verifyAWSAt(ctx context.Context, f core.Fetcher, base, ak, sk string) (VerifyResult, error) {
 	const region, service = "us-east-1", "sts"
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
@@ -321,7 +321,7 @@ func verifyAWSAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (Ve
 	kSigning := hmacSHA256(kService, []byte("aws4_request"))
 	signature := hex.EncodeToString(hmacSHA256(kSigning, []byte(stringToSign)))
 
-	req := capkit.Request{
+	req := core.Request{
 		Method: http.MethodGet,
 		URL:    base + "/?" + query,
 		Headers: map[string]string{
@@ -371,7 +371,7 @@ func verifyAWSAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (Ve
 
 // ────────────────────────── 华为云（SDK-HMAC-SHA256）──────────────────────────
 
-func verifyHuaweiAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (VerifyResult, error) {
+func verifyHuaweiAt(ctx context.Context, f core.Fetcher, base, ak, sk string) (VerifyResult, error) {
 	const host, path = "iam.myhuaweicloud.com", "/v3/auth/projects"
 	now := time.Now().UTC()
 	sdkDate := now.Format("20060102T150405Z")
@@ -388,7 +388,7 @@ func verifyHuaweiAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) 
 	stringToSign := "SDK-HMAC-SHA256\n" + sdkDate + "\n" + sha256Hex(canonicalRequest)
 	signature := hex.EncodeToString(hmacSHA256([]byte(sk), []byte(stringToSign)))
 
-	req := capkit.Request{
+	req := core.Request{
 		Method: http.MethodGet,
 		URL:    base + path,
 		Headers: map[string]string{
@@ -452,7 +452,7 @@ func normalizeCode(raw any) string {
 
 // ────────────────────────── 火山引擎（签名 V4,HMAC-SHA256/request）──────────────────────────
 
-func verifyVolcAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (VerifyResult, error) {
+func verifyVolcAt(ctx context.Context, f core.Fetcher, base, ak, sk string) (VerifyResult, error) {
 	const host, region, service = "iam.volcengineapi.com", "cn-north-1", "iam"
 	now := time.Now().UTC()
 	vDate := now.Format("20060102T150405Z")
@@ -482,7 +482,7 @@ func verifyVolcAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (V
 	kSigning := hmacSHA256(kService, []byte("request"))
 	signature := hex.EncodeToString(hmacSHA256(kSigning, []byte(stringToSign)))
 
-	req := capkit.Request{
+	req := core.Request{
 		Method: http.MethodGet,
 		URL:    base + "/?" + query,
 		Headers: map[string]string{
@@ -548,7 +548,7 @@ func verifyVolcAt(ctx context.Context, f capkit.Fetcher, base, ak, sk string) (V
 // fetchJSON issues a request via the injected fetcher and unmarshals a JSON body.
 // Returns HTTP 2xx and any unmarshal result. Vendor-specific error code/message
 // structures are read by the caller from its own decode target.
-func fetchJSON(ctx context.Context, f capkit.Fetcher, req capkit.Request, out any) (ok bool, err error) {
+func fetchJSON(ctx context.Context, f core.Fetcher, req core.Request, out any) (ok bool, err error) {
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
 	}

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // endpointResult is one probed path.
@@ -39,7 +39,7 @@ func probeTimeout(ms int) time.Duration {
 // probeBaseURL builds the scheme://host:port base for a probe, honoring an
 // explicit target URL, bare host[:port], and scheme/port overrides.
 func probeBaseURL(in probeInput, defaultScheme string, defaultPort int) (string, error) {
-	raw := strings.TrimSpace(capkit.FirstNonEmpty(in.Target, in.URL))
+	raw := strings.TrimSpace(core.FirstNonEmpty(in.Target, in.URL))
 	if raw == "" && strings.TrimSpace(in.Host) != "" {
 		raw = strings.TrimSpace(in.Host)
 		if in.Port > 0 {
@@ -93,8 +93,8 @@ func ensurePath(p string) string {
 	return p
 }
 
-func targetOf(base string) capkit.Target {
-	t, _ := capkit.TargetFromURL(0, base)
+func targetOf(base string) core.Target {
+	t, _ := core.TargetFromURL(0, base)
 	return t
 }
 
@@ -110,32 +110,32 @@ func fingerprint(kind, base, extra string) string {
 	return key
 }
 
-func (c *Capability) httpDoer() (capkit.HTTPDoer, *capkit.Error) {
+func (c *Capability) httpDoer() (core.HTTPDoer, *core.Error) {
 	if c.deps.HTTP == nil {
-		return nil, capkit.Unavailable("HTTPDoer 未注入（宿主需提供 capkit.Deps.HTTP）")
+		return nil, core.Unavailable("HTTPDoer 未注入（宿主需提供 core.Deps.HTTP）")
 	}
 	return c.deps.HTTP, nil
 }
 
 // get issues one GET through the injected gate-aware HTTPDoer.
-func (c *Capability) get(ctx context.Context, url string, timeout time.Duration) (*capkit.Response, error) {
-	return c.deps.HTTP.Do(ctx, capkit.Request{Method: "GET", URL: url, Timeout: timeout})
+func (c *Capability) get(ctx context.Context, url string, timeout time.Duration) (*core.Response, error) {
+	return c.deps.HTTP.Do(ctx, core.Request{Method: "GET", URL: url, Timeout: timeout})
 }
 
 // --- k8s_kubelet_probe ---
 
-func (c *Capability) kubeletProbe(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) kubeletProbe(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in probeInput
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	if _, e := c.httpDoer(); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	base, err := probeBaseURL(in, "https", 10250)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	paths := in.Paths
 	if len(paths) == 0 {
@@ -172,7 +172,7 @@ func (c *Capability) kubeletProbe(ctx context.Context, call capkit.Call) (capkit
 		endpoints = append(endpoints, ep)
 	}
 	if !responded && lastErr != nil {
-		return capkit.FailResult(capkit.TargetUnreachable(lastErr.Error())), nil
+		return core.FailResult(core.TargetUnreachable(lastErr.Error())), nil
 	}
 
 	summary := "kubelet 10250 需认证或不可读"
@@ -185,16 +185,16 @@ func (c *Capability) kubeletProbe(ctx context.Context, call capkit.Call) (capkit
 	})
 	res.Meta.Target = base
 	if unauth {
-		res.Status = capkit.StatusSuccess
-		res.Findings = []capkit.Finding{{
+		res.Status = core.StatusSuccess
+		res.Findings = []core.Finding{{
 			Target: targetOf(base), Kind: "k8s_kubelet_unauth",
 			Fingerprint: fingerprint("k8s_kubelet_unauth", base, ""),
 			Confirmed:   true, Source: "containerkit",
 			Evidence: []string{fmt.Sprintf("GET %s/pods -> 200（%d pods）", base, len(pods))},
 		}}
-		res.Next = []capkit.NextStep{{
+		res.Next = []core.NextStep{{
 			Tool: "k8s_apiserver_probe", Reason: "kubelet 只读接口未授权，进一步尝试匿名访问 API server 读取 Secret 与 SA token",
-			Risk: capkit.RiskMedium, Preconditions: []string{"目标仍在授权范围"},
+			Risk: core.RiskMedium, Preconditions: []string{"目标仍在授权范围"},
 		}}
 	}
 	return stamp(res, call.Tool, start), nil
@@ -202,18 +202,18 @@ func (c *Capability) kubeletProbe(ctx context.Context, call capkit.Call) (capkit
 
 // --- k8s_apiserver_probe ---
 
-func (c *Capability) apiserverProbe(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) apiserverProbe(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in probeInput
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	if _, e := c.httpDoer(); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	base, err := probeBaseURL(in, "https", 6443)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	paths := in.Paths
 	if len(paths) == 0 {
@@ -257,7 +257,7 @@ func (c *Capability) apiserverProbe(ctx context.Context, call capkit.Call) (capk
 		endpoints = append(endpoints, ep)
 	}
 	if !responded && lastErr != nil {
-		return capkit.FailResult(capkit.TargetUnreachable(lastErr.Error())), nil
+		return core.FailResult(core.TargetUnreachable(lastErr.Error())), nil
 	}
 
 	summary := "API server 6443 匿名访问不可用"
@@ -273,15 +273,15 @@ func (c *Capability) apiserverProbe(ctx context.Context, call capkit.Call) (capk
 	})
 	res.Meta.Target = base
 	if unauth {
-		res.Findings = []capkit.Finding{{
+		res.Findings = []core.Finding{{
 			Target: targetOf(base), Kind: "k8s_apiserver_anon",
 			Fingerprint: fingerprint("k8s_apiserver_anon", base, ""),
 			Confirmed:   true, Source: "containerkit",
 			Evidence: []string{fmt.Sprintf("匿名 GET %s/api 返回 200", base)},
 		}}
-		res.Next = []capkit.NextStep{{
+		res.Next = []core.NextStep{{
 			Tool: "k8s_etcd_probe", Reason: "匿名可读 API 发现接口，探测 etcd 未授权读以获取集群 Secret",
-			Risk: capkit.RiskMedium, Preconditions: []string{"目标仍在授权范围"},
+			Risk: core.RiskMedium, Preconditions: []string{"目标仍在授权范围"},
 		}}
 	}
 	return stamp(res, call.Tool, start), nil
@@ -335,19 +335,19 @@ func parseNamespaceNames(body []byte) []string {
 
 // --- k8s_etcd_probe ---
 
-func (c *Capability) etcdProbe(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) etcdProbe(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in probeInput
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	doer, e := c.httpDoer()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	base, err := probeBaseURL(in, "http", 2379)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	timeout := probeTimeout(in.TimeoutMS)
 	keyPrefix := strings.TrimSpace(in.KeyPrefix)
@@ -356,7 +356,7 @@ func (c *Capability) etcdProbe(ctx context.Context, call capkit.Call) (capkit.Re
 	}
 	body, err := buildEtcdRangeBody(keyPrefix)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 
 	// etcd v2.
@@ -378,7 +378,7 @@ func (c *Capability) etcdProbe(ctx context.Context, call capkit.Call) (capkit.Re
 	var keys []EtcdKV
 	v3endpoint := base + "/v3/kv/range"
 	v3Unauth := false
-	res3, err := doer.Do(ctx, capkit.Request{
+	res3, err := doer.Do(ctx, core.Request{
 		Method: "POST", URL: v3endpoint, Body: body,
 		Headers: map[string]string{"Content-Type": "application/json"}, Timeout: timeout,
 	})
@@ -418,7 +418,7 @@ func (c *Capability) etcdProbe(ctx context.Context, call capkit.Call) (capkit.Re
 	})
 	res.Meta.Target = base
 	if unauth {
-		res.Findings = []capkit.Finding{{
+		res.Findings = []core.Finding{{
 			Target: targetOf(base), Kind: "k8s_etcd_unauth",
 			Fingerprint: fingerprint("k8s_etcd_unauth", base, keyPrefix),
 			Confirmed:   true, Source: "containerkit",
@@ -439,19 +439,19 @@ type dockerContainer struct {
 	State string   `json:"state,omitempty"`
 }
 
-func (c *Capability) dockerProbe(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) dockerProbe(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in probeInput
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	doer, e := c.httpDoer()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	base, err := probeBaseURL(in, "http", 2375)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	timeout := probeTimeout(in.TimeoutMS)
 
@@ -464,7 +464,7 @@ func (c *Capability) dockerProbe(ctx context.Context, call capkit.Call) (capkit.
 		lastErr    error
 	)
 	for _, p := range dockerPaths {
-		res, err := doer.Do(ctx, capkit.Request{Method: "GET", URL: base + ensurePath(p), Timeout: timeout})
+		res, err := doer.Do(ctx, core.Request{Method: "GET", URL: base + ensurePath(p), Timeout: timeout})
 		if err != nil {
 			lastErr = err
 			endpoints = append(endpoints, endpointResult{Path: p, Error: err.Error()})
@@ -491,7 +491,7 @@ func (c *Capability) dockerProbe(ctx context.Context, call capkit.Call) (capkit.
 		endpoints = append(endpoints, ep)
 	}
 	if !responded && lastErr != nil {
-		return capkit.FailResult(capkit.TargetUnreachable(lastErr.Error())), nil
+		return core.FailResult(core.TargetUnreachable(lastErr.Error())), nil
 	}
 
 	summary := "Docker API 需要认证或不可达"
@@ -505,15 +505,15 @@ func (c *Capability) dockerProbe(ctx context.Context, call capkit.Call) (capkit.
 	})
 	res.Meta.Target = base
 	if unauth {
-		res.Findings = []capkit.Finding{{
+		res.Findings = []core.Finding{{
 			Target: targetOf(base), Kind: "docker_api_unauth",
 			Fingerprint: fingerprint("docker_api_unauth", base, ""),
 			Confirmed:   true, Source: "containerkit",
 			Evidence: []string{fmt.Sprintf("GET %s/version 未授权返回 200（%s）", base, version.Version)},
 		}}
-		res.Next = []capkit.NextStep{{
+		res.Next = []core.NextStep{{
 			Tool: "container_escape_plan", Reason: "Docker API 未授权可创建 privileged 容器并挂载宿主根目录，规划接管路径",
-			Risk: capkit.RiskHigh, Preconditions: []string{"目标仍在授权范围", "已获得可写 session 或可直接调用 daemon"},
+			Risk: core.RiskHigh, Preconditions: []string{"目标仍在授权范围", "已获得可写 session 或可直接调用 daemon"},
 		}}
 	}
 	return stamp(res, call.Tool, start), nil

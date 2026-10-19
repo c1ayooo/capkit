@@ -1,4 +1,4 @@
-package capkit
+package core
 
 import (
 	"encoding/json"

@@ -14,7 +14,7 @@ import (
 // process, so every tool's command line is unit-testable on its own.
 //
 // The impacket/NetExec binaries are external tools invoked ONLY as subprocesses
-// through capkit.ProcessRunner (docs §6.2/§6.4). Their source is never imported
+// through core.ProcessRunner (docs §6.2/§6.4). Their source is never imported
 // or vendored. GPL projects (sliver, sqlmap, jwt_tool) are never referenced.
 
 // Input is the union of every field any lat tool accepts. Each tool's builder

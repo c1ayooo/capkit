@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // TestAsyncCallReturnsJobRefAndIsPollable covers docs §5.5.5: a call with
@@ -23,20 +23,20 @@ func TestAsyncCallReturnsJobRefAndIsPollable(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 3, Actor: "async-test"}
+	cc := core.CallContext{ProjectID: 3, Actor: "async-test"}
 
 	input, _ := json.Marshal(map[string]any{"url": srv.URL, "async": true})
 	started, err := rt.Call(ctx, "http_probe", input, cc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started.Status != capkit.StatusPartial {
+	if started.Status != core.StatusPartial {
 		t.Fatalf("status = %q, want partial", started.Status)
 	}
 	var ref struct {
@@ -60,7 +60,7 @@ func TestAsyncCallReturnsJobRefAndIsPollable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if running.Status != capkit.StatusPartial {
+	if running.Status != core.StatusPartial {
 		t.Fatalf("running status = %q", running.Status)
 	}
 	if !json.Valid(running.Data) {
@@ -69,18 +69,18 @@ func TestAsyncCallReturnsJobRefAndIsPollable(t *testing.T) {
 
 	// Let the request finish; the poll then returns the tool's own envelope.
 	close(release)
-	var done capkit.Result
+	var done core.Result
 	for i := 0; i < 100; i++ {
 		done, err = rt.Call(ctx, "job_status", poll, cc)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if done.Status != capkit.StatusPartial {
+		if done.Status != core.StatusPartial {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if done.Status != capkit.StatusSuccess {
+	if done.Status != core.StatusSuccess {
 		t.Fatalf("final status = %q (summary %q)", done.Status, done.Summary)
 	}
 	if done.Meta.Tool != "http_probe" {
@@ -97,14 +97,14 @@ func TestAsyncCallReturnsJobRefAndIsPollable(t *testing.T) {
 // TestAsyncStillEnforcesScopeFirst keeps the gate ordering from §5.5.5 honest:
 // an out-of-scope target must fail immediately, not via a poll.
 func TestAsyncStillEnforcesScopeFirst(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": "http://example.com/", "async": true})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 1})
-	if err == nil || res.Status != capkit.StatusBlocked || res.Error.Code != capkit.CodeScopeDenied {
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 1})
+	if err == nil || res.Status != core.StatusBlocked || res.Error.Code != core.CodeScopeDenied {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	if len(res.Data) != 0 {
@@ -113,17 +113,17 @@ func TestAsyncStillEnforcesScopeFirst(t *testing.T) {
 }
 
 func TestJobStatusUnknownJob(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
-	res, _ := rt.Call(context.Background(), "job_status", json.RawMessage(`{"job_id":"job-nope"}`), capkit.CallContext{})
-	if res.Status != capkit.StatusFailed || res.Error.Code != capkit.CodeNotFound {
+	res, _ := rt.Call(context.Background(), "job_status", json.RawMessage(`{"job_id":"job-nope"}`), core.CallContext{})
+	if res.Status != core.StatusFailed || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
-	res, _ = rt.Call(context.Background(), "job_status", json.RawMessage(`{}`), capkit.CallContext{})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ = rt.Call(context.Background(), "job_status", json.RawMessage(`{}`), core.CallContext{})
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("res = %+v", res)
 	}
 }

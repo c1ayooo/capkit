@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/shellkit"
 )
 
@@ -36,31 +36,31 @@ func (d *fileDeployer) Drop(_ context.Context, req shellkit.WebShellDrop) (*shel
 	}, nil
 }
 
-func callDeploy(t *testing.T, cap0 capkit.Capability, tool string, input map[string]any) capkit.Result {
+func callDeploy(t *testing.T, cap0 core.Capability, tool string, input map[string]any) core.Result {
 	t.Helper()
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := cap0.Call(context.Background(), capkit.Call{Tool: tool, Input: raw})
+	res, err := cap0.Call(context.Background(), core.Call{Tool: tool, Input: raw})
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
 	return res
 }
 
-func newDeployCapability(t *testing.T, deployer shellkit.WebShellDeployer) capkit.Capability {
+func newDeployCapability(t *testing.T, deployer shellkit.WebShellDeployer) core.Capability {
 	t.Helper()
-	c, err := shellkit.NewCapabilityWithDeployer(capkit.Deps{}, deployer)
+	c, err := shellkit.NewCapabilityWithDeployer(core.Deps{}, deployer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-func newDeployCapabilityWithoutDeployer(t *testing.T) capkit.Capability {
+func newDeployCapabilityWithoutDeployer(t *testing.T) core.Capability {
 	t.Helper()
-	c, err := shellkit.NewCapability(capkit.Deps{})
+	c, err := shellkit.NewCapability(core.Deps{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestWebShellDeployWritesRealPayloadAndHandsBackSessionSpec(t *testing.T) {
 		"target": "http://127.0.0.1:8080/exec.php", "shell_type": "php",
 		"password": "pw1234", "watermark": "test-watermark",
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("deploy failed: %s / %+v", res.Summary, res.Error)
 	}
 
@@ -204,7 +204,7 @@ func TestWebShellDeployWithoutDeployerIsToolMissing(t *testing.T) {
 	res := callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1:8080/exec.php", "shell_type": "php",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -218,7 +218,7 @@ func TestWebShellDeployRejectsBadInputBeforeGenerating(t *testing.T) {
 	res := callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1/", "shell_type": "cfm",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("shell_type: %+v", res.Error)
 	}
 	if _, err := os.ReadDir(dir); err != nil || len(mustReaddir(t, dir)) != 0 {
@@ -229,13 +229,13 @@ func TestWebShellDeployRejectsBadInputBeforeGenerating(t *testing.T) {
 	res = callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1/", "shell_type": "php", "variant": "nuclear",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("variant: %+v", res.Error)
 	}
 
 	// Missing target.
 	res = callDeploy(t, cap0, "webshell_deploy", map[string]any{"shell_type": "php"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("target: %+v", res.Error)
 	}
 
@@ -244,7 +244,7 @@ func TestWebShellDeployRejectsBadInputBeforeGenerating(t *testing.T) {
 	res = callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1/", "shell_type": "jsp", "protocol": "godzilla",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("protocol: %+v", res.Error)
 	}
 }
@@ -254,7 +254,7 @@ func TestWebShellDeployDropFailureIsUpstream(t *testing.T) {
 	res := callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1:8080/exec.php", "shell_type": "php",
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeUpstreamError {
+	if res.Error == nil || res.Error.Code != core.CodeUpstreamError {
 		t.Fatalf("a host-side drop failure must be an upstream error: %+v", res.Error)
 	}
 	if !strings.Contains(res.Error.Message, "投递失败") {
@@ -270,7 +270,7 @@ func TestWebShellDeployPasswordAppearsOnlyInSessionSpec(t *testing.T) {
 	res := callDeploy(t, cap0, "webshell_deploy", map[string]any{
 		"target": "http://127.0.0.1:8080/exec.php", "shell_type": "php", "password": password,
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("deploy: %s", res.Summary)
 	}
 	// The Summary must not leak the password; the session spec legitimately
@@ -298,7 +298,7 @@ func TestWebShellDeployLiteVariantIsAccepted(t *testing.T) {
 		"target": "http://127.0.0.1:8080/exec.php", "shell_type": "php",
 		"variant": "lite", "password": "pw1234",
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("lite variant: %s / %+v", res.Summary, res.Error)
 	}
 	var out struct {

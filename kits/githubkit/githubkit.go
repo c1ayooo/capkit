@@ -8,24 +8,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Kit exposes GitHub Code Search for leaked secrets. It uses the external
 // Fetcher port (not target-scoped HTTP) and the host's GitHub token setting.
 type Kit struct {
 	client   *Client
-	evidence capkit.EvidenceSink
+	evidence core.EvidenceSink
 }
 
-func New(deps capkit.Deps) *Kit {
+func New(deps core.Deps) *Kit {
 	return &Kit{
 		client:   &Client{Fetcher: deps.Fetcher, Settings: deps.Settings, Limiter: deps.Limiter},
 		evidence: deps.Evidence,
 	}
 }
 
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(deps), nil }
+func NewCapability(deps core.Deps) (core.Capability, error) { return New(deps), nil }
 
 // SetProxyURL sets the egress proxy for GitHub API requests.
 func (k *Kit) SetProxyURL(proxy string) {
@@ -34,11 +34,11 @@ func (k *Kit) SetProxyURL(proxy string) {
 	}
 }
 
-func (k *Kit) Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func (k *Kit) Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "githubkit", Version: "0.1.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "fetcher", "settings"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "github_secret_search",
 				Description: "Search GitHub code for leaked secrets using a built-in dork template or a custom query. Returns repo/path/fragments, secret type and a static credibility hint; it does not validate the credential. Requires a GitHub token in settings (github.token).",
@@ -54,10 +54,10 @@ func (k *Kit) Manifest() capkit.Manifest {
     "cursor":{"type":"string","description":"分页游标，用上一次返回的 page.cursor 续取下一页"}
   }
 }`),
-				Risk:         capkit.RiskMedium,
+				Risk:         core.RiskMedium,
 				OutputSchema: json.RawMessage(`{"type":"object","properties":{"total_count":{"type":"integer","description":"GitHub 报告的真实命中总数"},"incomplete":{"type":"boolean"},"truncated":{"type":"boolean"},"page":{"type":"integer"},"per_page":{"type":"integer"},"query":{"type":"string"},"items":{"type":"array","items":{"type":"object"}}}}`),
-				RateLimit:    capkit.RateLimitSpec{PerSecond: 0.15, Burst: 2, Concurrency: 1},
-				ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+				RateLimit:    core.RateLimitSpec{PerSecond: 0.15, Burst: 2, Concurrency: 1},
+				ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 					var in searchInput
 					if err := json.Unmarshal(input, &in); err != nil {
 						return nil, err
@@ -65,23 +65,23 @@ func (k *Kit) Manifest() capkit.Manifest {
 					if strings.TrimSpace(in.Domain) == "" {
 						return nil, nil
 					}
-					t, err := capkit.TargetFromString(0, in.Domain)
+					t, err := core.TargetFromString(0, in.Domain)
 					if err != nil {
 						return nil, err
 					}
-					return []capkit.Target{t}, nil
+					return []core.Target{t}, nil
 				},
 			},
 			{
 				Name:           "github_dork_templates",
 				Description:    "List the built-in GitHub secret-search dork templates (id, category, title, query, note).",
 				InputSchema:    json.RawMessage(`{"type":"object","properties":{}}`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"count":{"type":"integer"},"templates":{"type":"array","items":{"type":"object"}}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			},
 		},
-		Settings: []capkit.SettingSpec{{
+		Settings: []core.SettingSpec{{
 			Key: "github.token", Type: "string", Secret: true,
 			Description: "GitHub personal access token for Code Search (requires code search permission).",
 		}},
@@ -113,47 +113,47 @@ const kitVersion = "0.1.0"
 
 // Call is the envelope shell: every return path from dispatch is normalized so
 // Status/OK/Meta and a clamped Summary hold on success and failure alike.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "github_secret_search":
 		return k.search(ctx, call)
 	case "github_dork_templates":
 		return k.templates(ctx)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (k *Kit) templates(context.Context) (capkit.Result, error) {
+func (k *Kit) templates(context.Context) (core.Result, error) {
 	list := Templates()
-	return capkit.SuccessResult(fmt.Sprintf("返回 %d 条 dork 模板", len(list)),
+	return core.SuccessResult(fmt.Sprintf("返回 %d 条 dork 模板", len(list)),
 		map[string]any{"templates": list, "count": len(list)})
 }
 
-func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) search(ctx context.Context, call core.Call) (core.Result, error) {
 	var in searchInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	query := strings.TrimSpace(in.Query)
 	label := "custom"
 	if strings.TrimSpace(in.TemplateID) != "" {
 		t, ok := TemplateByID(strings.TrimSpace(in.TemplateID))
 		if !ok {
-			return capkit.FailResult(capkit.NotFound("unknown dork template: " + in.TemplateID)), nil
+			return core.FailResult(core.NotFound("unknown dork template: " + in.TemplateID)), nil
 		}
 		query = BuildQuery(t, in.Org, in.Domain)
 		label = t.ID
 	}
 	if query == "" {
-		return capkit.FailResult(capkit.InvalidInput("query or template_id is required")), nil
+		return core.FailResult(core.InvalidInput("query or template_id is required")), nil
 	}
-	perPage := capkit.FirstPositive(in.PerPage, searchDefaultPerPage)
+	perPage := core.FirstPositive(in.PerPage, searchDefaultPerPage)
 	if perPage > searchMaxPerPage {
 		perPage = searchMaxPerPage
 	}
@@ -161,12 +161,12 @@ func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, erro
 	if c := strings.TrimSpace(in.Cursor); c != "" {
 		// Code search pages by page number, so translate the shared offset
 		// cursor back into one.
-		start, _, _, perr := capkit.PageWindow(1<<30, c, perPage)
+		start, _, _, perr := core.PageWindow(1<<30, c, perPage)
 		if perr != nil {
-			return capkit.FailResult(perr), nil
+			return core.FailResult(perr), nil
 		}
 		if start%perPage != 0 {
-			return capkit.FailResult(capkit.InvalidInput("cursor 非法，需使用上一次返回的 page.cursor")), nil
+			return core.FailResult(core.InvalidInput("cursor 非法，需使用上一次返回的 page.cursor")), nil
 		}
 		page = start/perPage + 1
 	}
@@ -175,7 +175,7 @@ func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, erro
 	}
 	result, err := k.client.Search(ctx, query, page, perPage)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	highConfidence := 0
 	for _, item := range result.Items {
@@ -185,25 +185,25 @@ func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, erro
 	}
 	summary := fmt.Sprintf("在 GitHub 检索 %s，命中 %d 条疑似泄露，高置信 %d 条",
 		query, result.TotalCount, highConfidence)
-	res, err := capkit.SuccessResult(summary, result)
+	res, err := core.SuccessResult(summary, result)
 	if err != nil {
-		return capkit.Result{}, err
+		return core.Result{}, err
 	}
 	// A code search can match far more than one page; report the true total and
 	// the cursor that reaches the next page.
 	next := (page-1)*perPage + len(result.Items)
-	res.Page = &capkit.Page{Total: result.TotalCount, HasMore: next < result.TotalCount}
+	res.Page = &core.Page{Total: result.TotalCount, HasMore: next < result.TotalCount}
 	if res.Page.HasMore {
-		res.Page.Cursor = capkit.CursorFor(next)
+		res.Page.Cursor = core.CursorFor(next)
 	}
 	res.Truncated = result.Truncated
 	if k.evidence != nil {
 		data, _ := json.Marshal(result)
-		target := capkit.Target{}
+		target := core.Target{}
 		if strings.TrimSpace(in.Domain) != "" {
-			target, _ = capkit.TargetFromString(call.Context.ProjectID, in.Domain)
+			target, _ = core.TargetFromString(call.Context.ProjectID, in.Domain)
 		}
-		id, eerr := k.evidence.Record(ctx, capkit.Evidence{
+		id, eerr := k.evidence.Record(ctx, core.Evidence{
 			Kind: "github_secret", Title: "GitHub secret search: " + label, Target: target,
 			Data: data, CreatedAt: time.Now(),
 			Metadata: map[string]string{

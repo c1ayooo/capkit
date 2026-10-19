@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // probeInput is the shared input of the four network probes. target may be a
@@ -28,12 +28,12 @@ type probeInput struct {
 // extractProbeTarget pulls the scope-checkable target out of a probe input so
 // the runtime can enforce scope before the tool runs. It is shared by all four
 // network probes.
-func extractProbeTarget(input json.RawMessage) ([]capkit.Target, error) {
+func extractProbeTarget(input json.RawMessage) ([]core.Target, error) {
 	var in probeInput
 	if err := json.Unmarshal(input, &in); err != nil {
 		return nil, err
 	}
-	raw := capkit.FirstNonEmpty(in.Target, in.URL)
+	raw := core.FirstNonEmpty(in.Target, in.URL)
 	if raw == "" && strings.TrimSpace(in.Host) != "" {
 		if in.Port > 0 {
 			raw = net.JoinHostPort(in.Host, strconv.Itoa(in.Port))
@@ -45,25 +45,25 @@ func extractProbeTarget(input json.RawMessage) ([]capkit.Target, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("target 必填（URL 或 host:port）")
 	}
-	t, err := capkit.TargetFromString(0, raw)
+	t, err := core.TargetFromString(0, raw)
 	if err != nil {
 		return nil, err
 	}
-	return []capkit.Target{t}, nil
+	return []core.Target{t}, nil
 }
 
 // noTargets marks tools that act on an existing session or on local data only,
 // so they declare no network target for scope enforcement.
-func noTargets(json.RawMessage) ([]capkit.Target, error) { return nil, nil }
+func noTargets(json.RawMessage) ([]core.Target, error) { return nil, nil }
 
 const probeTargetSchema = `{"type":"string","description":"目标地址，如 https://10.0.0.1:10250 或 10.0.0.1:10250"}`
 
-func kubeletProbeSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func kubeletProbeSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "k8s_kubelet_probe",
 		Description: "探测 kubelet 10250 只读接口（/pods、/runningpods/、/run/）是否未授权可读，并把响应解析为 pod/namespace 列表。请求经宿主 HTTPDoer 发送，受 scope/限速/审计约束。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -81,12 +81,12 @@ func kubeletProbeSpec() capkit.ToolSpec {
 	}
 }
 
-func apiserverProbeSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func apiserverProbeSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "k8s_apiserver_probe",
 		Description: "探测 API server 6443 的匿名访问（/api、/api/v1/namespaces、/version），报告匿名是否可用以及暴露的版本与 namespace。请求经宿主 HTTPDoer 发送。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -104,12 +104,12 @@ func apiserverProbeSpec() capkit.ToolSpec {
 	}
 }
 
-func etcdProbeSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func etcdProbeSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "k8s_etcd_probe",
 		Description: "探测 etcd 2379 的 /v2/keys 与 /v3/kv/range 未授权读。v3 请求体按 key_prefix 构造 base64 前缀扫描（默认 /registry/secrets），用于发现集群 Secret。请求经宿主 HTTPDoer 发送。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 4, Burst: 2, Concurrency: 2},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 4, Burst: 2, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -127,12 +127,12 @@ func etcdProbeSpec() capkit.ToolSpec {
 	}
 }
 
-func dockerProbeSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func dockerProbeSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "docker_api_probe",
 		Description: "探测 Docker daemon 2375/2376 的 /version 与 /containers/json 是否未授权。未授权即可创建 privileged 容器并挂载宿主根目录。请求经宿主 HTTPDoer 发送。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 3, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -149,12 +149,12 @@ func dockerProbeSpec() capkit.ToolSpec {
 	}
 }
 
-func escapeCheckSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func escapeCheckSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "container_escape_check",
 		Description: "对已建立的 session 运行一组只读、有界的容器逃逸面检查（docker.sock、privileged、capabilities、release_agent、core_pattern、宿主 PID 等），返回结构化逃逸面与 findings。不执行任何逃逸动作。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 4, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 4, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -169,12 +169,12 @@ func escapeCheckSpec() capkit.ToolSpec {
 	}
 }
 
-func escapePlanSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func escapePlanSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "container_escape_plan",
 		Description: "根据 container_escape_check 的结果（surface 对象或 session_id）返回按可利用性排序的候选逃逸技术，每条为一个 NextStep（tool/reason/preconditions/risk）。纯决策支持，不执行任何逃逸动作。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4},
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{

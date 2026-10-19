@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/tidwall/gjson"
 )
 
@@ -45,7 +45,7 @@ func parseTycAuth(cookie string) (authTk, tycid string, keepCookie bool) {
 	return "", "", true
 }
 
-func NewTycProvider(fetcher capkit.Fetcher, cookie string, proxyURL string) (Provider, error) {
+func NewTycProvider(fetcher core.Fetcher, cookie string, proxyURL string) (Provider, error) {
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
 		return nil, SessionMissing("天眼查会话未配置：请在企业数据源中填写 Cookie")

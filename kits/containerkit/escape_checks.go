@@ -14,7 +14,7 @@ type EscapeCheck struct {
 	ID string `json:"id"`
 	// Path is the filesystem or kernel object the check touches.
 	Path string `json:"path"`
-	// Command is run through capkit.Session.Exec.
+	// Command is run through core.Session.Exec.
 	Command string `json:"command"`
 	// Why explains what a positive result means for escape triage.
 	Why string `json:"why"`

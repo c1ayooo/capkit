@@ -11,14 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // stubFetcher routes requests to an httptest upstream, preserving method,
 // headers and body so signature math can be asserted.
 type stubFetcher struct{ srv *httptest.Server }
 
-func (f stubFetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f stubFetcher) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
 	var body io.Reader
 	if len(req.Body) > 0 {
 		body = bytes.NewReader(req.Body)
@@ -39,7 +39,7 @@ func (f stubFetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Res
 	if err != nil {
 		return nil, err
 	}
-	return &capkit.Response{Status: resp.StatusCode, Headers: resp.Header, Body: data}, nil
+	return &core.Response{Status: resp.StatusCode, Headers: resp.Header, Body: data}, nil
 }
 
 // newTestKit stands up an httptest upstream and points one provider at it.
@@ -258,7 +258,7 @@ func TestCapabilityCallCloud(t *testing.T) {
 	input, _ := json.Marshal(map[string]string{
 		"provider": ProviderAliyun, "access_key": "ak", "secret_key": "sk",
 	})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_cloud", Input: input})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCapabilityCallCloud(t *testing.T) {
 // TestCapabilityUnknownTool 未知工具名 → fail result。
 func TestCapabilityUnknownTool(t *testing.T) {
 	k := New(stubFetcher{})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
+	res, err := k.Call(context.Background(), core.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -396,11 +396,11 @@ func TestCallCloudSummary(t *testing.T) {
 	input, _ := json.Marshal(map[string]string{
 		"provider": ProviderAliyun, "access_key": "LTAI5tQxAbCdEfGhIjKlMn", "secret_key": "sk",
 	})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_cloud", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess || !res.OK {
+	if res.Status != core.StatusSuccess || !res.OK {
 		t.Fatalf("status = %s", res.Status)
 	}
 	if res.Meta.Tool != "credential_verify_cloud" {
@@ -425,7 +425,7 @@ func TestCallCloudInvalidSummary(t *testing.T) {
 	input, _ := json.Marshal(map[string]string{
 		"provider": ProviderAliyun, "access_key": "LTAIbadkey12345678", "secret_key": "sk",
 	})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_cloud", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestCallCloudInvalidSummary(t *testing.T) {
 func TestCallDBConnectionFailureSummary(t *testing.T) {
 	k := New(stubFetcher{})
 	input, _ := json.Marshal(map[string]any{"type": "redis", "host": "127.0.0.1", "port": 1})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_db", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_db", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestCallSSHConnectionFailureSummary(t *testing.T) {
 	input, _ := json.Marshal(map[string]any{
 		"host": "127.0.0.1", "port": 1, "username": "root", "password": "pw",
 	})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_ssh", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_ssh", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,11 +477,11 @@ func TestCallSSHConnectionFailureSummary(t *testing.T) {
 func TestCallSSHMissingAuthEnvelope(t *testing.T) {
 	k := New(stubFetcher{})
 	input, _ := json.Marshal(map[string]any{"host": "127.0.0.1", "username": "root"})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_ssh", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_ssh", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil {
+	if res.Status != core.StatusFailed || res.Error == nil {
 		t.Fatalf("res = %+v", res)
 	}
 	if !strings.Contains(res.Summary, "password") || res.Meta.Tool != "credential_verify_ssh" {
@@ -493,11 +493,11 @@ func TestCallSSHMissingAuthEnvelope(t *testing.T) {
 func TestCallDBUnsupportedEnvelope(t *testing.T) {
 	k := New(stubFetcher{})
 	input, _ := json.Marshal(map[string]any{"type": "mysql", "host": "127.0.0.1"})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_db", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_db", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil {
+	if res.Status != core.StatusFailed || res.Error == nil {
 		t.Fatalf("res = %+v", res)
 	}
 	if !strings.Contains(res.Summary, "暂未支持") || res.Meta.Tool != "credential_verify_db" {
@@ -509,11 +509,11 @@ func TestCallDBUnsupportedEnvelope(t *testing.T) {
 func TestCallCloudUnsupportedProvider(t *testing.T) {
 	k := New(stubFetcher{})
 	input, _ := json.Marshal(map[string]string{"provider": "gcp", "access_key": "ak", "secret_key": "sk"})
-	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	res, err := k.Call(context.Background(), core.Call{Tool: "credential_verify_cloud", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil {
+	if res.Status != core.StatusFailed || res.Error == nil {
 		t.Fatalf("res = %+v", res)
 	}
 	if !strings.Contains(res.Summary, "不支持的云厂商") || res.Meta.Tool != "credential_verify_cloud" {

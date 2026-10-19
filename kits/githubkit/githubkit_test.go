@@ -7,22 +7,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/runtime"
 )
 
 func TestGithubKitThroughRuntime(t *testing.T) {
-	reg := capkit.NewRegistry()
-	kit := New(capkit.Deps{})
-	if err := reg.Add(capkit.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
+	reg := core.NewRegistry()
+	kit := New(core.Deps{})
+	if err := reg.Add(core.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := runtime.New(runtime.Config{
 		Scope: gates.StaticScope("example.com"), Approval: gates.AutoApprove(),
 		Limiter: gates.NewLimiter(), Audit: auditlog.NewMemory(),
-		Fetcher:  &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(sampleJSON)}},
+		Fetcher:  &fakeFetcher{resp: &core.Response{Status: 200, Body: []byte(sampleJSON)}},
 		Settings: fakeSettings{m: map[string]string{"github.token": "ghp_test"}},
 	}, reg)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestGithubKitThroughRuntime(t *testing.T) {
 	input, _ := json.Marshal(map[string]any{
 		"template_id": "org-aws", "org": "acme", "domain": "example.com",
 	})
-	res, err := rt.Call(context.Background(), "github_secret_search", input, capkit.CallContext{ProjectID: 1, Actor: "tester"})
+	res, err := rt.Call(context.Background(), "github_secret_search", input, core.CallContext{ProjectID: 1, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,23 +48,23 @@ func TestGithubKitThroughRuntime(t *testing.T) {
 }
 
 func TestGithubKitScopeDenied(t *testing.T) {
-	reg := capkit.NewRegistry()
-	kit := New(capkit.Deps{})
-	if err := reg.Add(capkit.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
+	reg := core.NewRegistry()
+	kit := New(core.Deps{})
+	if err := reg.Add(core.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := runtime.New(runtime.Config{
 		Scope: gates.StaticScope("example.com"), Approval: gates.AutoApprove(),
 		Limiter: gates.NewLimiter(), Audit: auditlog.NewMemory(),
-		Fetcher:  &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(sampleJSON)}},
+		Fetcher:  &fakeFetcher{resp: &core.Response{Status: 200, Body: []byte(sampleJSON)}},
 		Settings: fakeSettings{m: map[string]string{"github.token": "ghp_test"}},
 	}, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	input, _ := json.Marshal(map[string]any{"template_id": "org-aws", "org": "acme", "domain": "evil.com"})
-	_, err = rt.Call(context.Background(), "github_secret_search", input, capkit.CallContext{ProjectID: 1})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeScopeDenied) {
+	_, err = rt.Call(context.Background(), "github_secret_search", input, core.CallContext{ProjectID: 1})
+	if err == nil || !strings.Contains(err.Error(), core.CodeScopeDenied) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -72,24 +72,24 @@ func TestGithubKitScopeDenied(t *testing.T) {
 // TestSearchReportsPagination covers §5.5.4 for the one tool whose result set is
 // genuinely unbounded: the envelope must carry the true total and a cursor.
 func TestSearchReportsPagination(t *testing.T) {
-	fetcher := &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(
+	fetcher := &fakeFetcher{resp: &core.Response{Status: 200, Body: []byte(
 		`{"total_count":250,"incomplete_results":false,"items":[` +
 			`{"path":"a.go","html_url":"https://github.com/o/r/blob/main/a.go",` +
 			`"repository":{"full_name":"o/r","html_url":"https://github.com/o/r","stargazers_count":1},` +
 			`"text_matches":[{"fragment":"token=x"}]}]}`)}}
-	kit := New(capkit.Deps{
+	kit := New(core.Deps{
 		Fetcher:  fetcher,
 		Settings: fakeSettings{m: map[string]string{"github.token": "ghp_test"}},
 	})
 	ctx := context.Background()
 
-	res, err := kit.Call(ctx, capkit.Call{
+	res, err := kit.Call(ctx, core.Call{
 		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"token","per_page":2}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q %s", res.Status, res.Summary)
 	}
 	if res.Page == nil || res.Page.Total != 250 || !res.Page.HasMore || res.Page.Cursor == "" {
@@ -100,7 +100,7 @@ func TestSearchReportsPagination(t *testing.T) {
 	}
 
 	// The cursor resumes at the next API page.
-	if _, err := kit.Call(ctx, capkit.Call{
+	if _, err := kit.Call(ctx, core.Call{
 		Tool:  "github_secret_search",
 		Input: json.RawMessage(`{"query":"token","per_page":2,"cursor":"` + res.Page.Cursor + `"}`),
 	}); err != nil {
@@ -111,23 +111,23 @@ func TestSearchReportsPagination(t *testing.T) {
 	}
 
 	// A garbled cursor is rejected rather than silently restarted.
-	bad, _ := kit.Call(ctx, capkit.Call{
+	bad, _ := kit.Call(ctx, core.Call{
 		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"token","cursor":"nope"}`),
 	})
-	if bad.Error == nil || bad.Error.Code != capkit.CodeInvalidInput {
+	if bad.Error == nil || bad.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("bad cursor = %+v", bad)
 	}
 }
 
 func TestDorkTemplatesSummary(t *testing.T) {
-	k := New(capkit.Deps{})
-	res, err := k.Call(context.Background(), capkit.Call{
+	k := New(core.Deps{})
+	res, err := k.Call(context.Background(), core.Call{
 		Tool: "github_dork_templates", Input: json.RawMessage(`{}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %s", res.Status)
 	}
 	if res.Meta.Tool != "github_dork_templates" {
@@ -141,18 +141,18 @@ func TestDorkTemplatesSummary(t *testing.T) {
 // TestSearchSummaryNoTokenLeak: the Summary names the query and the hit counts,
 // and never carries the GitHub token.
 func TestSearchSummaryNoTokenLeak(t *testing.T) {
-	fetcher := &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(sampleJSON)}}
-	k := New(capkit.Deps{
+	fetcher := &fakeFetcher{resp: &core.Response{Status: 200, Body: []byte(sampleJSON)}}
+	k := New(core.Deps{
 		Fetcher:  fetcher,
 		Settings: fakeSettings{m: map[string]string{"github.token": "ghp_supersecret"}},
 	})
-	res, err := k.Call(context.Background(), capkit.Call{
+	res, err := k.Call(context.Background(), core.Call{
 		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"AKIA"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %s", res.Status)
 	}
 	if res.Meta.Tool != "github_secret_search" {
@@ -169,17 +169,17 @@ func TestSearchSummaryNoTokenLeak(t *testing.T) {
 // TestSearchUnavailableEnvelope: a missing token is an unavailable dependency,
 // reported with the fixed code and a readable Summary.
 func TestSearchUnavailableEnvelope(t *testing.T) {
-	k := New(capkit.Deps{
-		Fetcher:  &fakeFetcher{resp: &capkit.Response{Status: 200}},
+	k := New(core.Deps{
+		Fetcher:  &fakeFetcher{resp: &core.Response{Status: 200}},
 		Settings: fakeSettings{},
 	})
-	res, err := k.Call(context.Background(), capkit.Call{
+	res, err := k.Call(context.Background(), core.Call{
 		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"AKIA"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeUnavailable {
 		t.Fatalf("res = %+v", res)
 	}
 	if res.Meta.Tool != "github_secret_search" || strings.TrimSpace(res.Summary) == "" {
@@ -188,9 +188,9 @@ func TestSearchUnavailableEnvelope(t *testing.T) {
 }
 
 func TestGithubUnknownToolEnvelope(t *testing.T) {
-	k := New(capkit.Deps{})
-	res, _ := k.Call(context.Background(), capkit.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	k := New(core.Deps{})
+	res, _ := k.Call(context.Background(), core.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
 	if res.Meta.Tool != "nope" {

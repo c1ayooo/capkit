@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-// httpDoer adapts net/http to capkit.HTTPDoer for hermetic probe tests. It is
+// httpDoer adapts net/http to core.HTTPDoer for hermetic probe tests. It is
 // deliberately dumb (no scope/limiter) because the probes' only contract is
 // "call HTTPDoer.Do"; gate enforcement lives in the host adapter.
 type httpDoer struct{}
 
-func (httpDoer) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (httpDoer) Do(ctx context.Context, req core.Request) (*core.Response, error) {
 	method := req.Method
 	if method == "" {
 		method = "GET"
@@ -38,13 +38,13 @@ func (httpDoer) Do(ctx context.Context, req capkit.Request) (*capkit.Response, e
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
-	return &capkit.Response{
+	return &core.Response{
 		Status: resp.StatusCode, Headers: resp.Header, Body: body,
 		Duration: time.Since(start), FinalURL: resp.Request.URL.String(),
 	}, nil
 }
 
-func newCap(t *testing.T, deps capkit.Deps) capkit.Capability {
+func newCap(t *testing.T, deps core.Deps) core.Capability {
 	t.Helper()
 	c, err := NewCapability(deps)
 	if err != nil {
@@ -53,20 +53,20 @@ func newCap(t *testing.T, deps capkit.Deps) capkit.Capability {
 	return c
 }
 
-func doCall(t *testing.T, c capkit.Capability, tool string, input any) capkit.Result {
+func doCall(t *testing.T, c core.Capability, tool string, input any) core.Result {
 	t.Helper()
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := c.Call(context.Background(), capkit.Call{Tool: tool, Input: raw})
+	res, err := c.Call(context.Background(), core.Call{Tool: tool, Input: raw})
 	if err != nil {
 		t.Fatalf("Call returned transport error: %v", err)
 	}
 	return res
 }
 
-func decodeData(t *testing.T, res capkit.Result) map[string]any {
+func decodeData(t *testing.T, res core.Result) map[string]any {
 	t.Helper()
 	var m map[string]any
 	if err := json.Unmarshal(res.Data, &m); err != nil {
@@ -90,9 +90,9 @@ func TestKubeletProbeUnauthHit(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_kubelet_probe", map[string]any{"target": srv.URL})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q (%s)", res.Status, res.Summary)
 	}
 	data := decodeData(t, res)
@@ -120,9 +120,9 @@ func TestKubeletProbeAuthRequired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_kubelet_probe", map[string]any{"target": srv.URL})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	data := decodeData(t, res)
@@ -139,23 +139,23 @@ func TestKubeletProbeUnreachable(t *testing.T) {
 	target := srv.URL
 	srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_kubelet_probe", map[string]any{"target": target})
-	if res.Status != capkit.StatusFailed {
+	if res.Status != core.StatusFailed {
 		t.Fatalf("status = %q", res.Status)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeTargetUnreachable {
+	if res.Error == nil || res.Error.Code != core.CodeTargetUnreachable {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
 
 func TestKubeletProbeMissingHTTPUnavailable(t *testing.T) {
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "k8s_kubelet_probe", map[string]any{"target": "10.0.0.1:10250"})
-	if res.Status != capkit.StatusUnavailable {
+	if res.Status != core.StatusUnavailable {
 		t.Fatalf("status = %q", res.Status)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+	if res.Error == nil || res.Error.Code != core.CodeUnavailable {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -175,7 +175,7 @@ func TestAPIServerProbeAnonymous(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_apiserver_probe", map[string]any{"target": srv.URL})
 	data := decodeData(t, res)
 	if data["unauth"] != true {
@@ -200,7 +200,7 @@ func TestAPIServerProbeForbidden(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_apiserver_probe", map[string]any{"target": srv.URL})
 	if decodeData(t, res)["unauth"] != false {
 		t.Fatal("403 must not be reported as anonymous access")
@@ -225,7 +225,7 @@ func TestEtcdProbeV3Unauth(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_etcd_probe", map[string]any{"target": srv.URL})
 	data := decodeData(t, res)
 	if data["unauth"] != true {
@@ -254,7 +254,7 @@ func TestEtcdProbeMiss(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "k8s_etcd_probe", map[string]any{"target": srv.URL})
 	if decodeData(t, res)["unauth"] != false {
 		t.Fatal("403 must not be reported as unauth etcd")
@@ -274,7 +274,7 @@ func TestDockerProbeUnauth(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "docker_api_probe", map[string]any{"target": srv.URL})
 	data := decodeData(t, res)
 	if data["unauth"] != true || data["version"] != "20.10.7" {
@@ -298,7 +298,7 @@ func TestDockerProbeAuthRequired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "docker_api_probe", map[string]any{"target": srv.URL})
 	if decodeData(t, res)["unauth"] != false {
 		t.Fatal("401 must not be reported as unauth docker api")
@@ -333,9 +333,9 @@ func TestProbeBaseURL(t *testing.T) {
 }
 
 func TestUnknownToolNotFound(t *testing.T) {
-	c := newCap(t, capkit.Deps{HTTP: httpDoer{}})
+	c := newCap(t, core.Deps{HTTP: httpDoer{}})
 	res := doCall(t, c, "no_such_tool", map[string]any{})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
 }

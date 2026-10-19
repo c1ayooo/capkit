@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 func linuxSurveySession(id string) *scriptedSession {
 	return &scriptedSession{
-		info: capkit.SessionInfo{ID: id, Kind: "ssh", Host: "10.0.0.10", OS: "linux"},
+		info: core.SessionInfo{ID: id, Kind: "ssh", Host: "10.0.0.10", OS: "linux"},
 		rules: []rule{
 			{match: "whoami", stdout: "root\n"},
 			{match: "hostname", stdout: "web01\n", evidenceID: "ev_host"},
@@ -31,7 +31,7 @@ func linuxSurveySession(id string) *scriptedSession {
 
 func windowsSurveySession(id string) *scriptedSession {
 	return &scriptedSession{
-		info: capkit.SessionInfo{ID: id, Kind: "winrm", Host: "10.0.0.20", OS: "windows"},
+		info: core.SessionInfo{ID: id, Kind: "winrm", Host: "10.0.0.20", OS: "windows"},
 		rules: []rule{
 			{match: "whoami", stdout: "corp\\admin\n"},
 			{match: "hostname", stdout: "WIN-DC01\n"},
@@ -56,7 +56,7 @@ func mustJSONInput(t *testing.T, v any) json.RawMessage {
 	return b
 }
 
-func decode[T any](t *testing.T, res capkit.Result) T {
+func decode[T any](t *testing.T, res core.Result) T {
 	t.Helper()
 	var out T
 	if err := json.Unmarshal(res.Data, &out); err != nil {
@@ -108,7 +108,7 @@ func TestManifestContract(t *testing.T) {
 
 func TestExtractTargets(t *testing.T) {
 	m := Manifest()
-	specs := map[string]capkit.ToolSpec{}
+	specs := map[string]core.ToolSpec{}
 	for _, s := range m.Tools {
 		specs[s.Name] = s
 	}
@@ -138,24 +138,24 @@ func TestExtractTargets(t *testing.T) {
 
 func TestUnknownTool(t *testing.T) {
 	c := capWith(newFakeManager())
-	res, err := c.Call(context.Background(), capkit.Call{Tool: "nope"})
+	res, err := c.Call(context.Background(), core.Call{Tool: "nope"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("unknown tool result = %+v", res.Error)
 	}
 }
 
 func TestMissingManagerFailsClosed(t *testing.T) {
 	c := capWith(nil)
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_local_info", Input: json.RawMessage(`{"session_id":"s1"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("missing manager result = %q %+v", res.Status, res.Error)
 	}
 }
@@ -171,11 +171,11 @@ func TestSessionNotFound(t *testing.T) {
 		"inet_smb_shares":     json.RawMessage(`{"session_id":"nope"}`),
 	}
 	for tool, in := range tools {
-		res, err := c.Call(context.Background(), capkit.Call{Tool: tool, Input: in})
+		res, err := c.Call(context.Background(), core.Call{Tool: tool, Input: in})
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
 		}
-		if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+		if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 			t.Fatalf("%s: status=%q err=%+v", tool, res.Status, res.Error)
 		}
 	}
@@ -188,23 +188,23 @@ func TestInvalidInput(t *testing.T) {
 	ctx := context.Background()
 
 	// empty session_id is invalid_input, not not_found.
-	res, _ := c.Call(ctx, capkit.Call{Tool: "inet_local_info", Input: json.RawMessage(`{}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ := c.Call(ctx, core.Call{Tool: "inet_local_info", Input: json.RawMessage(`{}`)})
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("empty session = %+v", res.Error)
 	}
 	// malformed JSON.
-	res, _ = c.Call(ctx, capkit.Call{Tool: "inet_local_info", Input: json.RawMessage(`{`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ = c.Call(ctx, core.Call{Tool: "inet_local_info", Input: json.RawMessage(`{`)})
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("bad json = %+v", res.Error)
 	}
 	// bad cidr.
-	res, _ = c.Call(ctx, capkit.Call{Tool: "inet_host_discovery", Input: json.RawMessage(`{"session_id":"s1","cidr":"nope"}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ = c.Call(ctx, core.Call{Tool: "inet_host_discovery", Input: json.RawMessage(`{"session_id":"s1","cidr":"nope"}`)})
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("bad cidr = %+v", res.Error)
 	}
 	// invalid ports.
-	res, _ = c.Call(ctx, capkit.Call{Tool: "inet_portscan", Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5"],"ports":"abc"}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ = c.Call(ctx, core.Call{Tool: "inet_portscan", Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5"],"ports":"abc"}`)})
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("bad ports = %+v", res.Error)
 	}
 }
@@ -217,13 +217,13 @@ func TestLocalInfoLinux(t *testing.T) {
 	mgr.add(s)
 	c := capWith(mgr)
 
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_local_info", Input: json.RawMessage(`{"session_id":"s1"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q summary=%q errors", res.Status, res.Summary)
 	}
 	info := decode[LocalInfo](t, res)
@@ -265,13 +265,13 @@ func TestLocalInfoWindows(t *testing.T) {
 	mgr.add(windowsSurveySession("w1"))
 	c := capWith(mgr)
 
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_local_info", Input: json.RawMessage(`{"session_id":"w1"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	info := decode[LocalInfo](t, res)
@@ -300,13 +300,13 @@ func TestLocalInfoPartialAndDetectOS(t *testing.T) {
 	mgr.add(s)
 	c := capWith(mgr)
 
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_local_info", Input: json.RawMessage(`{"session_id":"s1"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("status = %q, want partial", res.Status)
 	}
 	info := decode[LocalInfo](t, res)
@@ -323,7 +323,7 @@ func TestLocalInfoPartialAndDetectOS(t *testing.T) {
 func discoveryManager(id string) *fakeManager {
 	mgr := newFakeManager()
 	mgr.add(&scriptedSession{
-		info: capkit.SessionInfo{ID: id, OS: "linux"},
+		info: core.SessionInfo{ID: id, OS: "linux"},
 		rules: []rule{
 			{match: "ping -c 1", stdout: "UP 10.0.0.2\nUP 10.0.0.3\n", evidenceID: "ev_ping"},
 			{match: "arp -a", stdout: "? (10.0.0.2) at 00:11:22:33:44:55 [ether] on eth0\n" +
@@ -335,13 +335,13 @@ func discoveryManager(id string) *fakeManager {
 
 func TestHostDiscoveryPing(t *testing.T) {
 	c := capWith(discoveryManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_host_discovery", Input: json.RawMessage(`{"session_id":"s1","cidr":"10.0.0.0/29"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	d := decode[HostDiscovery](t, res)
@@ -362,7 +362,7 @@ func TestHostDiscoveryPing(t *testing.T) {
 
 func TestHostDiscoveryBounded(t *testing.T) {
 	c := capWith(discoveryManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_host_discovery", Input: json.RawMessage(`{"session_id":"s1","cidr":"10.0.0.0/24","max_hosts":5}`),
 	})
 	if err != nil {
@@ -379,7 +379,7 @@ func TestHostDiscoveryBounded(t *testing.T) {
 
 func TestHostDiscoveryARPMethod(t *testing.T) {
 	c := capWith(discoveryManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_host_discovery", Input: json.RawMessage(`{"session_id":"s1","cidr":"10.0.0.0/29","method":"arp"}`),
 	})
 	if err != nil {
@@ -396,7 +396,7 @@ func TestHostDiscoveryARPMethod(t *testing.T) {
 func scanManager(id string) *fakeManager {
 	mgr := newFakeManager()
 	mgr.add(&scriptedSession{
-		info: capkit.SessionInfo{ID: id, OS: "linux"},
+		info: core.SessionInfo{ID: id, OS: "linux"},
 		rules: []rule{
 			{match: "10.0.0.5", stdout: "OPEN 10.0.0.5 22\nOPEN 10.0.0.5 445\n", evidenceID: "ev_scan"},
 			{match: "10.0.0.6", stdout: "OPEN 10.0.0.6 3389\n"},
@@ -408,14 +408,14 @@ func scanManager(id string) *fakeManager {
 
 func TestPortScan(t *testing.T) {
 	c := capWith(scanManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "inet_portscan",
 		Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5","10.0.0.6"],"ports":"22,139,445,3389"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	d := decode[PortScan](t, res)
@@ -432,7 +432,7 @@ func TestPortScan(t *testing.T) {
 
 func TestPortScanBoundedPorts(t *testing.T) {
 	c := capWith(scanManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "inet_portscan",
 		Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5"],"ports":"1-5000","max_ports":10}`),
 	})
@@ -447,7 +447,7 @@ func TestPortScanBoundedPorts(t *testing.T) {
 
 func TestPortScanBoundedHosts(t *testing.T) {
 	c := capWith(scanManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "inet_portscan",
 		Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5","10.0.0.6","10.0.0.7"],"ports":"22","max_hosts":2}`),
 	})
@@ -465,7 +465,7 @@ func TestPortScanBoundedHosts(t *testing.T) {
 func TestDomainInfoWindows(t *testing.T) {
 	mgr := newFakeManager()
 	mgr.add(&scriptedSession{
-		info: capkit.SessionInfo{ID: "d1", OS: "windows"},
+		info: core.SessionInfo{ID: "d1", OS: "windows"},
 		rules: []rule{
 			{match: "net user /domain", stdout: sampleNetUser},
 			{match: "net group /domain", stdout: sampleNetGroup},
@@ -474,13 +474,13 @@ func TestDomainInfoWindows(t *testing.T) {
 		},
 	})
 	c := capWith(mgr)
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_domain_info", Input: json.RawMessage(`{"session_id":"d1","domain":"corp.local"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	d := decode[DomainInfo](t, res)
@@ -500,17 +500,17 @@ func TestDomainInfoWindows(t *testing.T) {
 func TestSMBSharesRemoteWindows(t *testing.T) {
 	mgr := newFakeManager()
 	mgr.add(&scriptedSession{
-		info:  capkit.SessionInfo{ID: "x1", OS: "windows"},
+		info:  core.SessionInfo{ID: "x1", OS: "windows"},
 		rules: []rule{{match: "net view", stdout: sampleNetView, evidenceID: "ev_smb"}},
 	})
 	c := capWith(mgr)
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_smb_shares", Input: json.RawMessage(`{"session_id":"x1","host":"10.0.0.9"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q", res.Status)
 	}
 	d := decode[SMBResult](t, res)
@@ -525,11 +525,11 @@ func TestSMBSharesRemoteWindows(t *testing.T) {
 func TestSMBSharesLocalAndLinux(t *testing.T) {
 	mgr := newFakeManager()
 	mgr.add(&scriptedSession{
-		info:  capkit.SessionInfo{ID: "x1", OS: "windows"},
+		info:  core.SessionInfo{ID: "x1", OS: "windows"},
 		rules: []rule{{match: "net share", stdout: sampleNetView}},
 	})
 	c := capWith(mgr)
-	res, _ := c.Call(context.Background(), capkit.Call{
+	res, _ := c.Call(context.Background(), core.Call{
 		Tool: "inet_smb_shares", Input: json.RawMessage(`{"session_id":"x1"}`),
 	})
 	d := decode[SMBResult](t, res)
@@ -539,11 +539,11 @@ func TestSMBSharesLocalAndLinux(t *testing.T) {
 
 	mgr2 := newFakeManager()
 	mgr2.add(&scriptedSession{
-		info:  capkit.SessionInfo{ID: "l1", OS: "linux"},
+		info:  core.SessionInfo{ID: "l1", OS: "linux"},
 		rules: []rule{{match: "smbclient", stdout: sampleSmbclient}},
 	})
 	c2 := capWith(mgr2)
-	res2, _ := c2.Call(context.Background(), capkit.Call{
+	res2, _ := c2.Call(context.Background(), core.Call{
 		Tool: "inet_smb_shares", Input: json.RawMessage(`{"session_id":"l1","host":"10.0.0.9"}`),
 	})
 	d2 := decode[SMBResult](t, res2)
@@ -557,7 +557,7 @@ func TestSMBSharesLocalAndLinux(t *testing.T) {
 // dropping rows.
 func TestPortScanPaginates(t *testing.T) {
 	c := capWith(scanManager("s1"))
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool: "inet_portscan",
 		Input: json.RawMessage(
 			`{"session_id":"s1","hosts":["10.0.0.5","10.0.0.6","10.0.0.7"],"ports":"22,139,445,3389,80,443","page_size":2}`),
@@ -580,7 +580,7 @@ func TestPortScanPaginates(t *testing.T) {
 	}
 
 	// The cursor addresses the second page.
-	res2, err := c.Call(context.Background(), capkit.Call{
+	res2, err := c.Call(context.Background(), core.Call{
 		Tool:  "inet_portscan",
 		Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5","10.0.0.6","10.0.0.7"],"ports":"22,139,445,3389,80,443","page_size":2,"cursor":"` + res.Page.Cursor + `"}`),
 	})
@@ -599,11 +599,11 @@ func TestPortScanPaginates(t *testing.T) {
 	}
 
 	// A garbled cursor is rejected, not silently restarted.
-	bad, _ := c.Call(context.Background(), capkit.Call{
+	bad, _ := c.Call(context.Background(), core.Call{
 		Tool:  "inet_portscan",
 		Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5"],"ports":"22","cursor":"oops"}`),
 	})
-	if bad.Error == nil || bad.Error.Code != capkit.CodeInvalidInput {
+	if bad.Error == nil || bad.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("bad cursor = %+v", bad)
 	}
 }
