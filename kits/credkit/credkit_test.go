@@ -385,3 +385,138 @@ func TestVerifySSHMissingInput(t *testing.T) {
 		t.Fatal("expected error for empty host")
 	}
 }
+
+// TestCallCloudSummary: valid path names the provider and the masked AK, and
+// the raw key never appears in the Summary.
+func TestCallCloudSummary(t *testing.T) {
+	k := newTestKit(t, ProviderAliyun, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"AccountId":"acc-1","Arn":"arn:test"}`)
+	}))
+	input, _ := json.Marshal(map[string]string{
+		"provider": ProviderAliyun, "access_key": "LTAI5tQxAbCdEfGhIjKlMn", "secret_key": "sk",
+	})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusSuccess || !res.OK {
+		t.Fatalf("status = %s", res.Status)
+	}
+	if res.Meta.Tool != "credential_verify_cloud" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+	want := "验证 aliyun AK LTAI…KlMn 有效，账号 acc-1"
+	if res.Summary != want {
+		t.Fatalf("summary = %q, want %q", res.Summary, want)
+	}
+	if strings.Contains(res.Summary, "AbCdEf") {
+		t.Fatalf("summary leaked key material: %q", res.Summary)
+	}
+}
+
+// TestCallCloudInvalidSummary: a rejected key reports "无效：<code>" with the
+// masked AK, never the raw one.
+func TestCallCloudInvalidSummary(t *testing.T) {
+	k := newTestKit(t, ProviderAliyun, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"Code":"InvalidAccessKeyId.NotFound","Message":"not found"}`)
+	}))
+	input, _ := json.Marshal(map[string]string{
+		"provider": ProviderAliyun, "access_key": "LTAIbadkey12345678", "secret_key": "sk",
+	})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Summary, "无效") || !strings.Contains(res.Summary, "InvalidAccessKeyId.NotFound") {
+		t.Fatalf("summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "credential_verify_cloud" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestCallDBConnectionFailureSummary: dialing a closed localhost port is an
+// offline failure branch; the target and reason must both be in the Summary.
+func TestCallDBConnectionFailureSummary(t *testing.T) {
+	k := New(stubFetcher{})
+	input, _ := json.Marshal(map[string]any{"type": "redis", "host": "127.0.0.1", "port": 1})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_db", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Summary, "127.0.0.1:1") || !strings.Contains(res.Summary, "连接失败") {
+		t.Fatalf("summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "credential_verify_db" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestCallSSHConnectionFailureSummary: closed localhost port, offline.
+func TestCallSSHConnectionFailureSummary(t *testing.T) {
+	k := New(stubFetcher{})
+	input, _ := json.Marshal(map[string]any{
+		"host": "127.0.0.1", "port": 1, "username": "root", "password": "pw",
+	})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_ssh", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Summary, "root@127.0.0.1:1") || !strings.Contains(res.Summary, "连接失败") {
+		t.Fatalf("summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "credential_verify_ssh" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestCallSSHMissingAuthEnvelope: a failure path still carries a Summary naming
+// the reason and a Meta.Tool.
+func TestCallSSHMissingAuthEnvelope(t *testing.T) {
+	k := New(stubFetcher{})
+	input, _ := json.Marshal(map[string]any{"host": "127.0.0.1", "username": "root"})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_ssh", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusFailed || res.Error == nil {
+		t.Fatalf("res = %+v", res)
+	}
+	if !strings.Contains(res.Summary, "password") || res.Meta.Tool != "credential_verify_ssh" {
+		t.Fatalf("envelope = %+v", res)
+	}
+}
+
+// TestCallDBUnsupportedEnvelope: an unsupported engine fails with a real reason.
+func TestCallDBUnsupportedEnvelope(t *testing.T) {
+	k := New(stubFetcher{})
+	input, _ := json.Marshal(map[string]any{"type": "mysql", "host": "127.0.0.1"})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_db", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusFailed || res.Error == nil {
+		t.Fatalf("res = %+v", res)
+	}
+	if !strings.Contains(res.Summary, "暂未支持") || res.Meta.Tool != "credential_verify_db" {
+		t.Fatalf("envelope = %+v", res)
+	}
+}
+
+// TestCallCloudUnsupportedProvider: unsupported provider fails with the reason.
+func TestCallCloudUnsupportedProvider(t *testing.T) {
+	k := New(stubFetcher{})
+	input, _ := json.Marshal(map[string]string{"provider": "gcp", "access_key": "ak", "secret_key": "sk"})
+	res, err := k.Call(context.Background(), capkit.Call{Tool: "credential_verify_cloud", Input: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusFailed || res.Error == nil {
+		t.Fatalf("res = %+v", res)
+	}
+	if !strings.Contains(res.Summary, "不支持的云厂商") || res.Meta.Tool != "credential_verify_cloud" {
+		t.Fatalf("envelope = %+v", res)
+	}
+}

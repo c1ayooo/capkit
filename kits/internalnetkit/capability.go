@@ -41,6 +41,8 @@ const (
 	scanConcurrency     = 2 // per-host concurrency ceiling
 
 	pingSweepChunk = 128
+
+	kitVersion = "0.1.0"
 )
 
 // Capability exposes the internal-network reconnaissance tools.
@@ -71,8 +73,15 @@ func Manifest() capkit.Manifest {
 // Manifest implements capkit.Capability.
 func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
 
-// Call dispatches one tool invocation.
+// Call dispatches one tool invocation and normalizes the envelope on every
+// return path (Status/OK/Meta.Tool/Meta.Version/Summary clamp).
 func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := c.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes the call to the tool implementation.
+func (c *Capability) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "inet_local_info":
 		return c.localInfo(ctx, call)
@@ -412,20 +421,29 @@ func (c *Capability) localInfo(ctx context.Context, call capkit.Call) (capkit.Re
 	res.Evidence = capkit.EvidenceRefs(outs...)
 	applyLocalStatus(&res, out.Errors)
 	res.Next = localNextSteps(in.SessionID, out.Interfaces)
-	res.Meta.Tool = "inet_local_info"
 	return res, nil
 }
 
 func localSummary(li *LocalInfo) string {
-	parts := []string{fmt.Sprintf("主机 %s", orDash(li.Hostname))}
-	if li.User != "" {
-		parts = append(parts, "用户 "+li.User)
+	return fmt.Sprintf("读取 %s 的本地信息：主机名 %s，网卡 %d 张，路由 %d 条，监听 %d 个",
+		sessionLabel(li.User, li.Hostname), orDash(li.Hostname),
+		len(li.Interfaces), len(li.Routes), len(li.Listeners))
+}
+
+// sessionLabel names a foothold as user@host, falling back to whichever half is
+// known. It never invents a host.
+func sessionLabel(user, host string) string {
+	user, host = strings.TrimSpace(user), strings.TrimSpace(host)
+	switch {
+	case user != "" && host != "":
+		return user + "@" + host
+	case host != "":
+		return host
+	case user != "":
+		return user
+	default:
+		return "-"
 	}
-	parts = append(parts, fmt.Sprintf("接口 %d", len(li.Interfaces)))
-	parts = append(parts, fmt.Sprintf("网段 %d", len(localCIDRs(li.Interfaces))))
-	parts = append(parts, fmt.Sprintf("用户 %d", len(li.Users)))
-	parts = append(parts, fmt.Sprintf("监听 %d", len(li.Listeners)))
-	return strings.Join(parts, "｜")
 }
 
 func applyLocalStatus(res *capkit.Result, errs []string) {
@@ -603,7 +621,8 @@ func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capki
 	sort.Slice(list, func(i, j int) bool { return ipLess(list[i].Host, list[j].Host) })
 
 	payload := HostDiscovery{CIDR: ipnet.String(), Method: method, Probed: len(hosts), Truncated: truncated, Hosts: list}
-	res, err := capkit.SuccessResult(fmt.Sprintf("网段 %s：探测 %d 主机，存活 %d", ipnet.String(), len(hosts), len(list)), payload)
+	res, err := capkit.SuccessResult(fmt.Sprintf("枚举内网主机：网段 %s 探测 %d 台，%d 台存活",
+		ipnet.String(), len(hosts), len(list)), payload)
 	if err != nil {
 		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
 	}
@@ -614,7 +633,6 @@ func (c *Capability) hostDiscovery(ctx context.Context, call capkit.Call) (capki
 		Risk:   capkit.RiskMedium,
 		Params: mustJSON(map[string]any{"session_id": in.SessionID, "hosts": hostList(list), "ports": "21,22,80,135,139,443,445,3389,5985,8080"}),
 	}}
-	res.Meta.Tool = "inet_host_discovery"
 	return res, nil
 }
 
@@ -738,15 +756,19 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 
 	status := capkit.StatusSuccess
 	ok := true
-	summary := fmt.Sprintf("扫描 %d 主机 / %d 端口，开放 %d", len(hosts), len(ports), len(all))
+	summary := fmt.Sprintf("扫描 %s 的 %d 个端口，开放 %d 个", hostLabel(hosts), len(ports), len(all))
+	if open := openPortList(all); open != "" {
+		summary += "：" + open
+	}
 	if page.HasMore {
 		summary += fmt.Sprintf("（本页 %d，用 page.cursor 续取）", len(window))
 	}
 	if fails == len(hosts) {
 		status, ok = capkit.StatusFailed, false
-		summary = "端口扫描全部失败（会话不可用？）"
+		summary = fmt.Sprintf("扫描 %s 失败：会话命令均未执行", hostLabel(hosts))
 	} else if fails > 0 {
 		status, ok = capkit.StatusPartial, true
+		summary += fmt.Sprintf("（%d/%d 台主机命令失败）", fails, len(hosts))
 	}
 	res, err := capkit.SuccessResult(summary, payload)
 	if err != nil {
@@ -759,8 +781,40 @@ func (c *Capability) portScan(ctx context.Context, call capkit.Call) (capkit.Res
 	res.Truncated = payload.Truncated || page.HasMore
 	res.Page = page
 	res.Evidence = capkit.EvidenceRefs(outs...)
-	res.Meta.Tool = "inet_portscan"
 	return res, nil
+}
+
+// hostLabel names the scan targets for a Summary: one host verbatim, or a
+// bounded host list.
+func hostLabel(hosts []string) string {
+	if len(hosts) == 1 {
+		return hosts[0]
+	}
+	shown := hosts
+	suffix := ""
+	if len(shown) > 3 {
+		shown = shown[:3]
+		suffix = "…"
+	}
+	return fmt.Sprintf("%d 台主机(%s%s)", len(hosts), strings.Join(shown, ","), suffix)
+}
+
+// openPortList renders the distinct open ports, bounded so the Summary stays
+// readable.
+func openPortList(open []OpenPort) string {
+	seen := map[int]bool{}
+	var nums []int
+	for _, p := range open {
+		if !seen[p.Port] {
+			seen[p.Port] = true
+			nums = append(nums, p.Port)
+		}
+	}
+	sort.Ints(nums)
+	if len(nums) > 10 {
+		return joinInts(nums[:10], ",") + ",…"
+	}
+	return joinInts(nums, ",")
 }
 
 func portScanCmd(host string, ports []int, tool string, perPortMS int) string {
@@ -895,13 +949,16 @@ func (c *Capability) domainInfo(ctx context.Context, call capkit.Call) (capkit.R
 		}
 	}
 
-	res, err := capkit.SuccessResult(fmt.Sprintf("域 %s：用户 %d，组 %d，信任 %d，域控 %d",
-		orDash(out.Domain), len(out.Users), len(out.Groups), len(out.Trusts), len(out.DCs)), out)
+	summary := fmt.Sprintf("查询域 %s 的信息：用户 %d 个，组 %d 个，信任 %d 条",
+		orDash(out.Domain), len(out.Users), len(out.Groups), len(out.Trusts))
+	if len(out.DCs) > 0 {
+		summary += "，域控 " + joinCapped(out.DCs, 3)
+	}
+	res, err := capkit.SuccessResult(summary, out)
 	if err != nil {
 		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
 	}
 	res.Evidence = capkit.EvidenceRefs(outs...)
-	res.Meta.Tool = "inet_domain_info"
 	return res, nil
 }
 
@@ -969,14 +1026,36 @@ func (c *Capability) smbShares(ctx context.Context, call capkit.Call) (capkit.Re
 	if displayTarget == "" {
 		displayTarget = "local"
 	}
-	res, err := capkit.SuccessResult(fmt.Sprintf("%s：发现 %d 个 SMB 共享", displayTarget, len(shares)),
-		SMBResult{Target: displayTarget, Count: len(shares), Shares: shares})
+	summary := fmt.Sprintf("枚举 %s 的 SMB 共享：%d 个", displayTarget, len(shares))
+	if names := joinCapped(shareNames(shares), 5); names != "" {
+		summary += "（" + names + "）"
+	}
+	res, err := capkit.SuccessResult(summary, SMBResult{Target: displayTarget, Count: len(shares), Shares: shares})
 	if err != nil {
 		return capkit.FailResult(capkit.UpstreamError(err.Error())), nil
 	}
 	res.Evidence = capkit.EvidenceRefs(outs...)
-	res.Meta.Tool = "inet_smb_shares"
 	return res, nil
+}
+
+// shareNames lists the discovered share names for a Summary.
+func shareNames(shares []Share) []string {
+	out := make([]string, 0, len(shares))
+	for _, s := range shares {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+// joinCapped joins at most max items, marking the rest with an ellipsis.
+func joinCapped(items []string, max int) string {
+	if max <= 0 || len(items) == 0 {
+		return ""
+	}
+	if len(items) <= max {
+		return strings.Join(items, ",")
+	}
+	return strings.Join(items[:max], ",") + ",…"
 }
 
 // ---- small helpers ----

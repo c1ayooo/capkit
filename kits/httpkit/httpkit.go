@@ -11,6 +11,10 @@ import (
 	"github.com/c1ayooo/capkit"
 )
 
+// kitVersion is the version stamped into every Result envelope. It mirrors the
+// manifest version so a host can attribute an envelope to a build.
+const kitVersion = "0.1.0"
+
 // Kit exposes structured HTTP probing. It uses only the injected HTTPDoer,
 // so scope/rate/audit gates cannot be bypassed.
 type Kit struct {
@@ -25,7 +29,7 @@ func New(deps capkit.Deps) *Kit {
 
 func (k *Kit) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "httpkit", Version: "0.1.0", APIVersion: "v1",
+		Name: "httpkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "http"},
 		Tools: []capkit.ToolSpec{{
 			Name:        "http_probe",
@@ -72,7 +76,15 @@ type probeInput struct {
 	Proxy     string            `json:"proxy"`
 }
 
+// Call is the envelope shell: it runs the tool and normalizes the Result so
+// every return path carries a valid Status, Meta.Tool and a clamped Summary.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes a call to its tool implementation, exactly as before.
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "http_probe":
 		return k.probe(ctx, call)
@@ -87,7 +99,8 @@ func (k *Kit) probe(ctx context.Context, call capkit.Call) (capkit.Result, error
 		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
 	}
 	if k.HTTP == nil {
-		return capkit.FailResult(capkit.Unavailable("http doer is not configured")), nil
+		return capkit.FailResult(capkit.Unavailable(
+			"对 " + in.URL + " 探测不可用：http doer is not configured")), nil
 	}
 	timeout := time.Duration(in.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -115,7 +128,16 @@ func (k *Kit) probe(ctx context.Context, call capkit.Call) (capkit.Result, error
 		"body_bytes": len(res.Body), "duration_ms": res.Duration.Milliseconds(),
 		"final_url": res.FinalURL,
 	}
-	result, _ := capkit.DataResult(out)
+	// Summary is the agent-readable line: target + action + the real result.
+	// The body itself is never inlined here — only its byte count is reported;
+	// the full exchange lives behind EvidenceIDs.
+	server := headerValue(res.Headers, "Server")
+	if server == "" {
+		server = "-"
+	}
+	summary := fmt.Sprintf("对 %s 发 %s 探测，HTTP %d，%d 字节，Server=%s",
+		in.URL, method, res.Status, len(res.Body), server)
+	result, _ := capkit.SuccessResult(summary, out)
 
 	if k.Evidence != nil {
 		target, _ := capkit.TargetFromURL(call.Context.ProjectID, in.URL)
@@ -148,4 +170,14 @@ func hostOf(raw string) string {
 		return raw
 	}
 	return u.Host
+}
+
+// headerValue returns the first value of name (case-insensitive), or "".
+func headerValue(headers map[string][]string, name string) string {
+	for k, vs := range headers {
+		if strings.EqualFold(k, name) && len(vs) > 0 {
+			return vs[0]
+		}
+	}
+	return ""
 }

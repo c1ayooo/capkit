@@ -20,7 +20,7 @@ Capability tools:
 
 - `icp_query`：按域名/单位名称查备案或黑名单，`type` ∈ `web|app|mapp|kapp`，
   黑名单 `bweb|bapp|bmapp|bkapp`
-- `icp_query_types`：列出支持的查询类型
+- `icp_types`：列出支持的查询类型
 
 Uses the external `Fetcher` port：请求有限速与审计，但不做项目目标范围检查
 （MIIT 是数据源，不是被授权目标）。出口代理由宿主注入：
@@ -31,5 +31,5 @@ kit.Client().WithProxy("http://127.0.0.1:8888") // 可选
 ```
 
 4zrec 接线见 `internal/platform/server/icp_tools.go`：`icp_query` /
-`icp_query_types` 播种并绑定 recon/worker/planner/auto。它与 `icp_expand` 互补——
+`icp_types` 播种并绑定 recon/worker/planner/auto。它与 `icp_expand` 互补——
 后者用备案号反查测绘引擎拿关联域名，本 kit 直读官方备案库。

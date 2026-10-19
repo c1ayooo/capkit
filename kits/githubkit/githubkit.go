@@ -108,7 +108,17 @@ type searchInput struct {
 	Cursor string `json:"cursor"`
 }
 
+// kitVersion mirrors the Manifest Version; Normalize stamps it into Meta.
+const kitVersion = "0.1.0"
+
+// Call is the envelope shell: every return path from dispatch is normalized so
+// Status/OK/Meta and a clamped Summary hold on success and failure alike.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "github_secret_search":
 		return k.search(ctx, call)
@@ -120,8 +130,9 @@ func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error)
 }
 
 func (k *Kit) templates(context.Context) (capkit.Result, error) {
-	res, _ := capkit.DataResult(map[string]any{"templates": Templates(), "count": len(Templates())})
-	return res, nil
+	list := Templates()
+	return capkit.SuccessResult(fmt.Sprintf("返回 %d 条 dork 模板", len(list)),
+		map[string]any{"templates": list, "count": len(list)})
 }
 
 func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, error) {
@@ -166,7 +177,18 @@ func (k *Kit) search(ctx context.Context, call capkit.Call) (capkit.Result, erro
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	res, _ := capkit.DataResult(result)
+	highConfidence := 0
+	for _, item := range result.Items {
+		if item.Credibility.Level == "high" {
+			highConfidence++
+		}
+	}
+	summary := fmt.Sprintf("在 GitHub 检索 %s，命中 %d 条疑似泄露，高置信 %d 条",
+		query, result.TotalCount, highConfidence)
+	res, err := capkit.SuccessResult(summary, result)
+	if err != nil {
+		return capkit.Result{}, err
+	}
 	// A code search can match far more than one page; report the true total and
 	// the cursor that reaches the next page.
 	next := (page-1)*perPage + len(result.Items)

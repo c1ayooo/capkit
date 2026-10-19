@@ -10,6 +10,9 @@ import (
 	"github.com/c1ayooo/capkit"
 )
 
+// kitVersion is stamped into every Result envelope (mirrors the manifest).
+const kitVersion = "0.1.0"
+
 // Kit wraps the nuclei execution engine. Execution scheduling, process
 // management, concurrency and JSONL parsing belong here; template indexing is
 // delegated to a TemplateCatalog implementation (wired by the host later).
@@ -28,7 +31,7 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(dep
 
 func (k *Kit) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "nucleikit", Version: "0.1.0", APIVersion: "v1",
+		Name: "nucleikit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "process", "binary"},
 		Tools: []capkit.ToolSpec{
 			{
@@ -76,7 +79,15 @@ type scanInput struct {
 	TimeoutSec int      `json:"timeout_sec"`
 }
 
+// Call is the envelope shell: it runs the tool and normalizes the Result so
+// every return path carries a valid Status, Meta.Tool and a clamped Summary.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes a call to its tool implementation, exactly as before.
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "nuclei_scan":
 		return k.scan(ctx, call)
@@ -89,13 +100,19 @@ func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error)
 
 func (k *Kit) status(ctx context.Context, _ capkit.Call) (capkit.Result, error) {
 	if k.Binaries == nil {
-		return capkit.FailResult(capkit.Unavailable("binary manager is not configured")), nil
+		return capkit.FailResult(capkit.Unavailable(
+			"nuclei 状态不可用：binary manager is not configured")), nil
 	}
 	st, err := k.Binaries.Status(ctx, "nuclei")
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	res, _ := capkit.DataResult(st)
+	state := "未安装"
+	if st.Installed {
+		state = "已安装"
+	}
+	res, _ := capkit.SuccessResult(fmt.Sprintf("nuclei 环境：%s，版本 %s，路径 %s",
+		state, orDash(st.Version), orDash(st.Path)), st)
 	return res, nil
 }
 
@@ -108,7 +125,8 @@ func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 		return capkit.FailResult(capkit.InvalidInput("targets is required")), nil
 	}
 	if k.Binaries == nil || k.Processes == nil {
-		return capkit.FailResult(capkit.Unavailable("nuclei binary/process runner is not configured")), nil
+		return capkit.FailResult(capkit.Unavailable(
+			"nuclei 扫描不可用：binary/process runner is not configured")), nil
 	}
 	version := "3.11.1"
 	if k.Settings != nil {
@@ -153,14 +171,26 @@ func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 		hits = append(hits, parseJSONL(proc.Stdout)...)
 		if proc.ExitCode != 0 {
 			return capkit.FailResult(capkit.NewError(capkit.CodeInternal,
-				fmt.Sprintf("nuclei exited %d: %s", proc.ExitCode, truncate(string(proc.Stderr), 500)))), nil
+				fmt.Sprintf("对 %s 扫描失败：nuclei exited %d: %s",
+					raw, proc.ExitCode, truncate(string(proc.Stderr), 500)))), nil
 		}
 	}
 	out := map[string]any{
 		"hits": hits, "hit_count": len(hits), "target_count": len(in.Targets),
 		"raw_lines": len(strings.Split(strings.TrimSpace(strings.Join(rawLines, "\n")), "\n")),
 	}
-	result, _ := capkit.DataResult(out)
+	critical, high := countSeverity(hits)
+	tplPhrase := "默认模板集"
+	if len(in.Templates) > 0 {
+		tplPhrase = fmt.Sprintf("%d 个模板", len(in.Templates))
+	}
+	targetPhrase := fmt.Sprintf("%d 个目标", len(in.Targets))
+	if len(in.Targets) == 1 {
+		targetPhrase = in.Targets[0]
+	}
+	summary := fmt.Sprintf("对 %s 执行 %s，命中 %d 项，其中严重 %d/高危 %d",
+		targetPhrase, tplPhrase, len(hits), critical, high)
+	result, _ := capkit.SuccessResult(summary, out)
 	if k.Evidence != nil {
 		id, err := k.Evidence.Record(ctx, capkit.Evidence{
 			Kind: "nuclei", Title: fmt.Sprintf("nuclei scan (%d targets)", len(in.Targets)),
@@ -193,6 +223,36 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+// orDash renders an empty field as "-" so a Summary never has a blank slot.
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return s
+}
+
+// countSeverity tallies nuclei JSONL hits by severity, used by the scan
+// Summary so the agent sees the risk profile without parsing Data.
+func countSeverity(hits []any) (critical, high int) {
+	for _, h := range hits {
+		m, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+		info, ok := m["info"].(map[string]any)
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(info["severity"]))) {
+		case "critical":
+			critical++
+		case "high":
+			high++
+		}
+	}
+	return critical, high
 }
 
 func mustJSON(v any) []byte {

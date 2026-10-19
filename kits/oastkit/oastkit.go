@@ -17,6 +17,9 @@ import (
 
 const DefaultBaseURL = "http://dnslog.cn"
 
+// kitVersion is stamped into every Result envelope (mirrors the manifest).
+const kitVersion = "0.1.0"
+
 type Client struct {
 	Fetcher capkit.Fetcher
 	BaseURL string
@@ -150,7 +153,7 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(dep
 
 func (k *Kit) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "oastkit", Version: "0.1.0", APIVersion: "v1",
+		Name: "oastkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"limiter", "audit", "fetcher"},
 		Tools: []capkit.ToolSpec{
 			{
@@ -180,7 +183,15 @@ func (k *Kit) Manifest() capkit.Manifest {
 	}
 }
 
+// Call is the envelope shell: it runs the tool and normalizes the Result so
+// every return path carries a valid Status, Meta.Tool and a clamped Summary.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes a call to its tool implementation, exactly as before.
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "oast_get_domain":
 		return k.getDomain(ctx)
@@ -196,7 +207,7 @@ func (k *Kit) getDomain(ctx context.Context) (capkit.Result, error) {
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	res, _ := capkit.DataResult(map[string]any{"domain": domain})
+	res, _ := capkit.SuccessResult("申请到 dnslog 回连域名 "+domain, map[string]any{"domain": domain})
 	return res, nil
 }
 
@@ -212,7 +223,8 @@ func (k *Kit) getRecords(ctx context.Context, call capkit.Call) (capkit.Result, 
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	res, _ := capkit.DataResult(map[string]any{"domain": in.Domain, "records": records, "count": len(records)})
+	summary := fmt.Sprintf("查询 %s 的 DNS 交互记录，命中 %d 条", strings.TrimSpace(in.Domain), len(records))
+	res, _ := capkit.SuccessResult(summary, map[string]any{"domain": in.Domain, "records": records, "count": len(records)})
 	if k.evidence != nil && len(records) > 0 {
 		data, _ := json.Marshal(records)
 		id, eerr := k.evidence.Record(ctx, capkit.Evidence{

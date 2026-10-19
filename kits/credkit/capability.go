@@ -92,8 +92,18 @@ func (k *Kit) Manifest() capkit.Manifest {
 	}
 }
 
-// Call routes one tool invocation.
+// kitVersion mirrors the Manifest Version; Normalize stamps it into Meta.
+const kitVersion = "0.1.0"
+
+// Call is the envelope shell: every return path from dispatch is normalized so
+// Status/OK/Meta and a clamped Summary hold on success and failure alike.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes one tool invocation.
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "credential_verify_cloud":
 		return k.verifyCloud(ctx, call.Input)
@@ -119,7 +129,31 @@ func (k *Kit) verifyCloud(ctx context.Context, input json.RawMessage) (capkit.Re
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(res)
+	return capkit.SuccessResult(cloudSummary(in.Provider, in.AccessKey, res), res)
+}
+
+// cloudSummary names the provider and the masked AK (never the raw key) and
+// reports the verification conclusion. The AK is masked with MaskKey.
+func cloudSummary(provider, accessKey string, res VerifyResult) string {
+	mask := MaskKey(strings.TrimSpace(accessKey))
+	reason := res.Code
+	if reason == "" {
+		reason = res.Message
+	}
+	switch res.Status {
+	case StatusValid:
+		s := fmt.Sprintf("验证 %s AK %s 有效", provider, mask)
+		if res.AccountID != "" {
+			s += "，账号 " + res.AccountID
+		}
+		return s
+	case StatusRestricted:
+		return fmt.Sprintf("验证 %s AK %s 有效但权限受限：%s", provider, mask, reason)
+	case StatusInvalid:
+		return fmt.Sprintf("%s AK %s 无效：%s", provider, mask, reason)
+	default:
+		return fmt.Sprintf("无法验证 %s AK %s：%s", provider, mask, reason)
+	}
 }
 
 func (k *Kit) verifyDB(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
@@ -131,7 +165,28 @@ func (k *Kit) verifyDB(ctx context.Context, input json.RawMessage) (capkit.Resul
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(res)
+	return capkit.SuccessResult(dbSummary(in, res), res)
+}
+
+// dbSummary names the engine, the credential target and the read result.
+func dbSummary(in DBProbeInput, res *DBProbeResult) string {
+	typ := strings.ToLower(strings.TrimSpace(in.Type))
+	port := in.Port
+	if port <= 0 {
+		port = DefaultDBPort(typ)
+	}
+	where := credWhere(in.Username, in.Host, port)
+	if res.Authed {
+		read := res.Version
+		if read == "" {
+			read = res.Database
+		}
+		if read != "" {
+			return fmt.Sprintf("验证 %s 凭据 %s 有效，可读 %s", typ, where, read)
+		}
+		return fmt.Sprintf("验证 %s 凭据 %s 有效", typ, where)
+	}
+	return fmt.Sprintf("验证 %s 凭据 %s 连接失败：%s", typ, where, res.Detail)
 }
 
 func (k *Kit) verifySSH(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
@@ -143,7 +198,35 @@ func (k *Kit) verifySSH(ctx context.Context, input json.RawMessage) (capkit.Resu
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(res)
+	return capkit.SuccessResult(sshSummary(in, res), res)
+}
+
+// sshSummary names the login target and the permission-surface result.
+func sshSummary(in SSHProbeInput, res *SSHProbeResult) string {
+	port := in.Port
+	if port <= 0 {
+		port = 22
+	}
+	where := credWhere(in.Username, in.Host, port)
+	switch {
+	case res.Authed && res.SudoNOPW:
+		return fmt.Sprintf("验证 SSH 凭据 %s 有效，具备 sudo 权限", where)
+	case res.Authed:
+		return fmt.Sprintf("验证 SSH 凭据 %s 有效，无免密 sudo", where)
+	case res.Alive:
+		return fmt.Sprintf("SSH 凭据 %s 无效：%s", where, res.Detail)
+	default:
+		return fmt.Sprintf("SSH 凭据 %s 连接失败：%s", where, res.Detail)
+	}
+}
+
+// credWhere renders "<user>@<host>:<port>", dropping an empty user.
+func credWhere(user, host string, port int) string {
+	host = strings.TrimSpace(host)
+	if strings.TrimSpace(user) == "" {
+		return fmt.Sprintf("%s:%d", host, port)
+	}
+	return fmt.Sprintf("%s@%s:%d", strings.TrimSpace(user), host, port)
 }
 
 // hostPortTargets extracts a host:port target from a db/ssh tool input.

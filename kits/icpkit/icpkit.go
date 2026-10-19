@@ -19,6 +19,9 @@ import (
 	"github.com/c1ayooo/capkit"
 )
 
+// kitVersion is the manifest version Normalize stamps into Result.Meta.Version.
+const kitVersion = "0.1.0"
+
 // Kit exposes the MIIT beian lookup as a capkit capability.
 type Kit struct {
 	client   *Client
@@ -49,7 +52,7 @@ func (k *Kit) Client() *Client { return k.client }
 // extracts targets; the lookup key is carried in the query result instead.
 func (k *Kit) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "icpkit", Version: "0.1.0", APIVersion: "v1",
+		Name: "icpkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"fetcher"},
 		Tools: []capkit.ToolSpec{
 			mustTool(capkit.ToolSpec{
@@ -92,13 +95,22 @@ func mustTool(t capkit.ToolSpec) capkit.ToolSpec {
 	return t
 }
 
-// Call routes one tool invocation.
+// Call routes one tool invocation. It is a thin envelope shell: dispatch does
+// the work, then Normalize completes Status/OK/Meta.Tool/Meta.Version and clamps
+// Summary, so every return path — happy or error — carries the same envelope.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "icp_query":
 		return k.query(ctx, call.Input)
 	case "icp_types":
-		return capkit.DataResult(TypeCatalog())
+		catalog := TypeCatalog()
+		return capkit.SuccessResult(
+			fmt.Sprintf("返回 %d 种 ICP 主体类型", len(catalog)), catalog)
 	default:
 		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
 	}
@@ -161,7 +173,7 @@ func (k *Kit) query(ctx context.Context, input json.RawMessage) (capkit.Result, 
 		out["count"] = n
 	}
 
-	res, rerr := capkit.DataResult(out)
+	res, rerr := capkit.SuccessResult(summarizeQuery(name, qtype, parsed), out)
 	if rerr != nil {
 		return capkit.FailResult(rerr), nil
 	}
@@ -198,4 +210,70 @@ func listLen(parsed any) (int, bool) {
 		return 0, false
 	}
 	return len(list), true
+}
+
+// summarizeQuery renders the agent-facing Summary for icp_query: what was
+// queried, what was found and the key result. The target always comes from the
+// caller's query — never a hardcoded domain.
+func summarizeQuery(name, qtype string, parsed any) string {
+	subject := "ICP 备案"
+	if IsBlackType(qtype) {
+		subject = "ICP 黑名单备案"
+	}
+	n, _ := listLen(parsed)
+	if n == 0 {
+		if IsBlackType(qtype) {
+			return fmt.Sprintf("%s 未查到黑名单记录", name)
+		}
+		return fmt.Sprintf("%s 未查到备案", name)
+	}
+	unit, no := firstRecordIdentity(parsed)
+	switch {
+	case unit != "" && no != "":
+		return fmt.Sprintf("查询 %s 的 %s：主办单位 %s，备案号 %s", name, subject, unit, no)
+	case unit != "":
+		return fmt.Sprintf("查询 %s 的 %s：主办单位 %s", name, subject, unit)
+	case no != "":
+		return fmt.Sprintf("查询 %s 的 %s：备案号 %s", name, subject, no)
+	default:
+		return fmt.Sprintf("查询 %s 的 %s：返回 %d 条记录", name, subject, n)
+	}
+}
+
+// firstRecordIdentity pulls the 主办单位 and 备案号 out of the first record, so
+// the Summary can name the entity rather than just count rows. Field names vary
+// between the list and the App/MiniApp/快应用 detail payloads.
+func firstRecordIdentity(parsed any) (unit, no string) {
+	root, ok := parsed.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	params, ok := root["params"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	list, ok := params["list"].([]any)
+	if !ok || len(list) == 0 {
+		return "", ""
+	}
+	rec, ok := list[0].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	unit = recordString(rec, "unitName", "unit_name", "companyName", "company")
+	no = recordString(rec, "serviceLicence", "mainLicence", "licence", "license", "number")
+	return unit, no
+}
+
+func recordString(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok {
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }

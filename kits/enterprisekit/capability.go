@@ -3,6 +3,7 @@ package enterprisekit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/c1ayooo/capkit"
@@ -26,11 +27,14 @@ func (f ResolverFunc) Resolve(ctx context.Context, provider string) (Provider, e
 // persistence and background-job semantics.
 type Kit struct{ Resolver ProviderResolver }
 
+// kitVersion mirrors the Manifest version and is stamped into every envelope.
+const kitVersion = "0.1.0"
+
 func NewKit(resolver ProviderResolver) *Kit { return &Kit{Resolver: resolver} }
 
 func (k *Kit) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "enterprisekit", Version: "0.1.0", APIVersion: "v1",
+		Name: "enterprisekit", Version: kitVersion, APIVersion: "v1",
 		Tools: []capkit.ToolSpec{
 			{
 				Name:        "enterprise_search",
@@ -72,14 +76,29 @@ func (k *Kit) Manifest() capkit.Manifest {
 	}
 }
 
+// Call dispatches one tool invocation and normalizes the envelope on every
+// return path (Status/OK/Meta.Tool/Meta.Version/Summary clamp).
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes the call to the tool implementation.
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "enterprise_search":
 		return k.search(ctx, call.Input)
 	case "enterprise_detail":
 		return k.detail(ctx, call.Input)
 	case "enterprise_providers":
-		return capkit.DataResult(map[string]any{"providers": Registry, "count": len(Registry)})
+		available := 0
+		for _, p := range Registry {
+			if p.Available {
+				available++
+			}
+		}
+		return capkit.SuccessResult(fmt.Sprintf("返回 %d 个企业数据源，其中 %d 个可用", len(Registry), available),
+			map[string]any{"providers": Registry, "count": len(Registry)})
 	default:
 		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
 	}
@@ -112,7 +131,9 @@ func (k *Kit) search(ctx context.Context, input json.RawMessage) (capkit.Result,
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(map[string]any{"provider": p.Name(), "items": refs, "count": len(refs)})
+	return capkit.SuccessResult(
+		fmt.Sprintf("在 %s 检索企业关键词 %q，返回 %d 条", p.Name(), in.Keyword, len(refs)),
+		map[string]any{"provider": p.Name(), "items": refs, "count": len(refs)})
 }
 
 func (k *Kit) detail(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
@@ -131,5 +152,10 @@ func (k *Kit) detail(ctx context.Context, input json.RawMessage) (capkit.Result,
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(detail)
+	domains := 0
+	if detail != nil {
+		domains = len(detail.Domains)
+	}
+	return capkit.SuccessResult(
+		fmt.Sprintf("从 %s 获取企业 %s 详情，关联域名 %d 个", p.Name(), in.ExtID, domains), detail)
 }

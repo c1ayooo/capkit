@@ -3,6 +3,7 @@ package githubkit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -115,5 +116,84 @@ func TestSearchReportsPagination(t *testing.T) {
 	})
 	if bad.Error == nil || bad.Error.Code != capkit.CodeInvalidInput {
 		t.Fatalf("bad cursor = %+v", bad)
+	}
+}
+
+func TestDorkTemplatesSummary(t *testing.T) {
+	k := New(capkit.Deps{})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "github_dork_templates", Input: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusSuccess {
+		t.Fatalf("status = %s", res.Status)
+	}
+	if res.Meta.Tool != "github_dork_templates" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+	if want := fmt.Sprintf("返回 %d 条 dork 模板", len(Templates())); res.Summary != want {
+		t.Fatalf("summary = %q, want %q", res.Summary, want)
+	}
+}
+
+// TestSearchSummaryNoTokenLeak: the Summary names the query and the hit counts,
+// and never carries the GitHub token.
+func TestSearchSummaryNoTokenLeak(t *testing.T) {
+	fetcher := &fakeFetcher{resp: &capkit.Response{Status: 200, Body: []byte(sampleJSON)}}
+	k := New(capkit.Deps{
+		Fetcher:  fetcher,
+		Settings: fakeSettings{m: map[string]string{"github.token": "ghp_supersecret"}},
+	})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"AKIA"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusSuccess {
+		t.Fatalf("status = %s", res.Status)
+	}
+	if res.Meta.Tool != "github_secret_search" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+	if want := "在 GitHub 检索 AKIA，命中 1 条疑似泄露，高置信 1 条"; res.Summary != want {
+		t.Fatalf("summary = %q, want %q", res.Summary, want)
+	}
+	if strings.Contains(res.Summary, "ghp_") {
+		t.Fatalf("summary leaked token: %q", res.Summary)
+	}
+}
+
+// TestSearchUnavailableEnvelope: a missing token is an unavailable dependency,
+// reported with the fixed code and a readable Summary.
+func TestSearchUnavailableEnvelope(t *testing.T) {
+	k := New(capkit.Deps{
+		Fetcher:  &fakeFetcher{resp: &capkit.Response{Status: 200}},
+		Settings: fakeSettings{},
+	})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "github_secret_search", Input: json.RawMessage(`{"query":"AKIA"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+		t.Fatalf("res = %+v", res)
+	}
+	if res.Meta.Tool != "github_secret_search" || strings.TrimSpace(res.Summary) == "" {
+		t.Fatalf("envelope = %+v", res)
+	}
+}
+
+func TestGithubUnknownToolEnvelope(t *testing.T) {
+	k := New(capkit.Deps{})
+	res, _ := k.Call(context.Background(), capkit.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
+	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+		t.Fatalf("res = %+v", res)
+	}
+	if res.Meta.Tool != "nope" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
 	}
 }

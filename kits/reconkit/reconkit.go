@@ -68,13 +68,13 @@ type AssetSink interface {
 }
 
 type Options struct {
-	Domains         []string
-	Ports           []int
-	EnableSubdomain bool
-	EnableResolve   bool
-	EnablePorts     bool
-	EnableHTTP      bool
-	MaxHosts        int
+	Domains         []string `json:"domains"`
+	Ports           []int    `json:"ports"`
+	EnableSubdomain bool     `json:"enable_subdomain"`
+	EnableResolve   bool     `json:"enable_resolve"`
+	EnablePorts     bool     `json:"enable_ports"`
+	EnableHTTP      bool     `json:"enable_http"`
+	MaxHosts        int      `json:"max_hosts"`
 }
 
 type Stats struct {

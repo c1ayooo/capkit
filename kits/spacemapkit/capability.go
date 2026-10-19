@@ -9,11 +9,14 @@ import (
 	"github.com/c1ayooo/capkit"
 )
 
+// kitVersion is the manifest version Normalize stamps into Result.Meta.Version.
+const kitVersion = "0.1.0"
+
 // Manifest exposes the engine search surface. Space-mapping queries hit
 // external provider APIs, so the host wires these tools with a Fetcher.
 func (c *Client) Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "spacemapkit", Version: "0.1.0", APIVersion: "v1",
+		Name: "spacemapkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"fetcher"},
 		Tools: []capkit.ToolSpec{
 			{
@@ -63,7 +66,15 @@ func (c *Client) Manifest() capkit.Manifest {
 	}
 }
 
+// Call routes one tool invocation. It is a thin envelope shell: dispatch does
+// the work, then Normalize completes Status/OK/Meta.Tool/Meta.Version and clamps
+// Summary, so every return path — happy or error — carries the same envelope.
 func (c *Client) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := c.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+func (c *Client) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "space_search":
 		return c.search(ctx, call.Input)
@@ -72,7 +83,7 @@ func (c *Client) Call(ctx context.Context, call capkit.Call) (capkit.Result, err
 	case "space_providers":
 		return c.providers(), nil
 	default:
-		return capkit.FailResult(fmt.Errorf("unknown tool %s", call.Tool)), nil
+		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
@@ -97,7 +108,8 @@ func (c *Client) search(ctx context.Context, input json.RawMessage) (capkit.Resu
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(resp)
+	return capkit.SuccessResult(fmt.Sprintf("用 %s 查询 %s，返回 %d 条资产",
+		ProviderDisplayName(resp.Provider), strings.TrimSpace(in.Query), resp.ResultsCount), resp)
 }
 
 func (c *Client) domainSearch(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
@@ -120,17 +132,24 @@ func (c *Client) domainSearch(ctx context.Context, input json.RawMessage) (capki
 	if err != nil {
 		return capkit.FailResult(err), nil
 	}
-	return capkit.DataResult(resp)
+	return capkit.SuccessResult(fmt.Sprintf("用 %s 查询域名 %s 的资产，返回 %d 条",
+		ProviderDisplayName(resp.Provider), domain, resp.ResultsCount), resp)
 }
 
 func (c *Client) providers() capkit.Result {
 	rows := make([]map[string]any, 0, len(Providers))
+	configured := 0
 	for _, p := range Providers {
+		ok := c.SourceConfigured(p)
+		if ok {
+			configured++
+		}
 		rows = append(rows, map[string]any{
 			"provider": p, "display": ProviderDisplayName(p),
-			"configured": c.SourceConfigured(p), "domain_query": DomainQueryTemplate(p),
+			"configured": ok, "domain_query": DomainQueryTemplate(p),
 		})
 	}
-	res, _ := capkit.DataResult(rows)
+	res, _ := capkit.SuccessResult(
+		fmt.Sprintf("返回 %d 个测绘引擎，其中 %d 个密钥已配置", len(Providers), configured), rows)
 	return res
 }

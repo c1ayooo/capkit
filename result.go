@@ -185,6 +185,36 @@ func BlockedResult(err *Error) Result {
 	return Result{OK: false, Status: StatusBlocked, Summary: ClampSummary(err.Message), Error: err}
 }
 
+// Normalize completes the envelope fields a kit owns on every return path, so
+// a tool cannot satisfy the contract on its happy path and violate it on an
+// error path: it fills an unset Status from Error/OK, keeps OK consistent with
+// Status, stamps Meta.Tool and Meta.Version, and clamps Summary.
+//
+// A kit calls it once, in its Call dispatcher, rather than at each return. It
+// deliberately does not invent a Summary — a generic "完成" tells an agent
+// nothing, so a missing Summary has to surface as a contract failure.
+func (r Result) Normalize(tool, version string) Result {
+	if !r.Status.Valid() {
+		switch {
+		case r.Error != nil:
+			r.Status = StatusForError(r.Error)
+		case r.OK:
+			r.Status = StatusSuccess
+		default:
+			r.Status = StatusFailed
+		}
+	}
+	r.OK = r.Status == StatusSuccess || r.Status == StatusPartial
+	if r.Meta.Tool == "" {
+		r.Meta.Tool = tool
+	}
+	if r.Meta.Version == "" {
+		r.Meta.Version = version
+	}
+	r.Summary = ClampSummary(r.Summary)
+	return r
+}
+
 // ClampData enforces the 8KB Data ceiling, replacing oversized payloads with a
 // valid-JSON truncation marker. The real size of the dropped payload is
 // reported in Page.Total so the agent knows how much it did not receive

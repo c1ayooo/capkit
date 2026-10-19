@@ -10,6 +10,7 @@ import (
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/all"
 	"github.com/c1ayooo/capkit/gates"
+	"github.com/c1ayooo/capkit/kits/verifykit"
 	"github.com/c1ayooo/capkit/runtime"
 )
 
@@ -48,14 +49,17 @@ func (f *fakeCatalog) Get(_ context.Context, id string) (capkit.TemplateRef, boo
 }
 
 type fakeEngine struct {
-	kind  string
-	calls int
+	kind     string
+	calls    int
+	findings []capkit.Finding
 }
 
 func (f *fakeEngine) Kind() string { return f.kind }
 func (f *fakeEngine) Execute(_ context.Context, refs []capkit.TemplateRef, _ capkit.Target, _ map[string]any) (capkit.Result, error) {
 	f.calls++
-	return capkit.TextResult("executed " + strings.Join(ids(refs), ",")), nil
+	res := capkit.TextResult("executed " + strings.Join(ids(refs), ","))
+	res.Findings = f.findings
+	return res, nil
 }
 
 func ids(refs []capkit.TemplateRef) []string {
@@ -142,5 +146,118 @@ func TestVerifyExecuteMissingTemplate(t *testing.T) {
 	}
 	if res.OK || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+// newDirectKit builds a verifykit capability with scripted fakes so the
+// envelope (Summary/Status/Meta) can be asserted without the runtime's
+// back-fill, mirroring what the contract gate does.
+func newDirectKit(t *testing.T, fp capkit.FingerprintProvider, cat capkit.TemplateCatalog, engines map[string]capkit.TemplateEngine) *verifykit.Kit {
+	t.Helper()
+	k, err := verifykit.New(capkit.Deps{Fingerprints: fp, Templates: cat, TemplateEngines: engines})
+	if err != nil {
+		t.Fatalf("verifykit.New: %v", err)
+	}
+	return k
+}
+
+func TestVerifyPlanSummary(t *testing.T) {
+	cat := &fakeCatalog{refs: map[string]capkit.TemplateRef{
+		"t1": {ID: "t1", Kind: "http", Engine: "http", Meta: map[string]string{"products": "nginx", "severity": "high"}},
+		"t2": {ID: "t2", Kind: "http", Engine: "http", Meta: map[string]string{"products": "nginx", "severity": "low"}},
+	}}
+	k := newDirectKit(t, &fakeFP{products: []string{"nginx"}}, cat,
+		map[string]capkit.TemplateEngine{"http": &fakeEngine{kind: "http"}})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "verify_plan", Input: json.RawMessage(`{"target":"http://127.0.0.1"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusSuccess || !res.OK {
+		t.Fatalf("status = %s", res.Status)
+	}
+	if res.Meta.Tool != "verify_plan" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+	want := "按 1 个指纹为 http://127.0.0.1 规划 2 个模板（高危 1 个）"
+	if res.Summary != want {
+		t.Fatalf("summary = %q, want %q", res.Summary, want)
+	}
+}
+
+func TestVerifyExecuteSummary(t *testing.T) {
+	eng := &fakeEngine{kind: "http", findings: []capkit.Finding{
+		{Kind: "sqli", Confirmed: true}, {Kind: "xss", Confirmed: false},
+	}}
+	cat := &fakeCatalog{refs: map[string]capkit.TemplateRef{
+		"t1": {ID: "t1", Kind: "http", Engine: "http"},
+	}}
+	k := newDirectKit(t, &fakeFP{}, cat, map[string]capkit.TemplateEngine{"http": eng})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "verify_execute", Input: json.RawMessage(`{"target":"http://127.0.0.1","template_ids":["t1"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Meta.Tool != "verify_execute" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+	want := "对 http://127.0.0.1 执行 1 个模板，命中 2 项，其中确认 1 项"
+	if res.Summary != want {
+		t.Fatalf("summary = %q, want %q", res.Summary, want)
+	}
+}
+
+// TestVerifyExecuteBadInputEnvelope: a failure path must still carry a real
+// Summary and a Meta.Tool, not a generic phrase.
+func TestVerifyExecuteBadInputEnvelope(t *testing.T) {
+	k := newDirectKit(t, &fakeFP{}, &fakeCatalog{refs: map[string]capkit.TemplateRef{}},
+		map[string]capkit.TemplateEngine{"http": &fakeEngine{kind: "http"}})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "verify_execute", Input: json.RawMessage(`{"target":"http://127.0.0.1","template_ids":[]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+		t.Fatalf("res = %+v", res)
+	}
+	if strings.TrimSpace(res.Summary) == "" || res.Meta.Tool != "verify_execute" {
+		t.Fatalf("envelope = %+v", res)
+	}
+}
+
+// TestVerifyExecuteEngineUnavailableEnvelope: an unavailable dependency must
+// surface as StatusUnavailable with the fixed error code, not a bare error.
+func TestVerifyExecuteEngineUnavailableEnvelope(t *testing.T) {
+	cat := &fakeCatalog{refs: map[string]capkit.TemplateRef{
+		"t1": {ID: "t1", Kind: "nuclei", Engine: "nuclei"},
+	}}
+	k := newDirectKit(t, &fakeFP{}, cat,
+		map[string]capkit.TemplateEngine{"http": &fakeEngine{kind: "http"}})
+	res, err := k.Call(context.Background(), capkit.Call{
+		Tool: "verify_execute", Input: json.RawMessage(`{"target":"http://127.0.0.1","template_ids":["t1"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+		t.Fatalf("res = %+v", res)
+	}
+	if res.Meta.Tool != "verify_execute" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
+	}
+}
+
+func TestVerifyUnknownToolEnvelope(t *testing.T) {
+	k := newDirectKit(t, &fakeFP{}, &fakeCatalog{refs: map[string]capkit.TemplateRef{}},
+		map[string]capkit.TemplateEngine{"http": &fakeEngine{kind: "http"}})
+	res, _ := k.Call(context.Background(), capkit.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
+	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+		t.Fatalf("res = %+v", res)
+	}
+	if res.Meta.Tool != "nope" {
+		t.Fatalf("meta.tool = %q", res.Meta.Tool)
 	}
 }

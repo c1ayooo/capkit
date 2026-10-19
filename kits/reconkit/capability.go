@@ -16,6 +16,9 @@ type Capability struct {
 	pipeline *Pipeline
 }
 
+// kitVersion mirrors the Manifest version and is stamped into every envelope.
+const kitVersion = "0.2.0"
+
 // NewCapability builds the recon capability from the host's providers. The
 // pipeline is expected to be pre-wired by the host (providers + sink + scope +
 // limiter); a zero pipeline is accepted but returns unavailable at call time.
@@ -28,7 +31,7 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
 // Manifest declares the recon tools.
 func Manifest() capkit.Manifest {
 	return capkit.Manifest{
-		Name: "reconkit", Version: "0.2.0", APIVersion: "v1",
+		Name: "reconkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit"},
 		Tools: []capkit.ToolSpec{{
 			Name:        "recon_run",
@@ -75,8 +78,15 @@ func Manifest() capkit.Manifest {
 // Manifest implements capkit.Capability.
 func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
 
-// Call dispatches the recon tools.
+// Call dispatches the recon tools and normalizes the envelope on every return
+// path (Status/OK/Meta.Tool/Meta.Version/Summary clamp).
 func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := c.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+// dispatch routes the call to the tool implementation.
+func (c *Capability) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "recon_run":
 		return c.run(ctx, call)
@@ -101,12 +111,13 @@ func (c *Capability) run(ctx context.Context, call capkit.Call) (capkit.Result, 
 		return capkit.FailResult(capkit.AsError(err)), nil
 	}
 	res, _ := capkit.SuccessResult(
-		fmt.Sprintf("侦察完成：%d 子域、%d 主机、%d 端口、%d 资产", stats.Subdomains, stats.Hosts, stats.Ports, stats.Assets),
+		fmt.Sprintf("对 %d 个域名执行侦察流水线：子域 %d、解析 %d、主机 %d、端口 %d、HTTP %d，资产 %d 条",
+			stats.Domains, stats.Subdomains, stats.Resolved, stats.Hosts, stats.Ports, stats.HTTP, stats.Assets),
 		stats,
 	)
 	if len(stats.Errors) > 0 {
 		res.Status = capkit.StatusPartial
-		res.Summary = capkit.ClampSummary(res.Summary + "（" + fmt.Sprintf("%d", len(stats.Errors)) + " 个错误）")
+		res.Summary = capkit.ClampSummary(res.Summary + fmt.Sprintf("（%d 个错误）", len(stats.Errors)))
 	}
 	return res, nil
 }

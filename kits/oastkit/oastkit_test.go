@@ -65,3 +65,36 @@ func TestParseRecordsLines(t *testing.T) {
 		t.Fatalf("records = %+v", got)
 	}
 }
+
+func TestOastSummaries(t *testing.T) {
+	f := &fakeFetcher{responses: []*capkit.Response{
+		{Status: 200, Body: []byte("abc.dnslog.cn")},
+		{Status: 200, Body: []byte(`["1.2.3.4","5.6.7.8"]`)},
+	}}
+	kit := New(capkit.Deps{Fetcher: f})
+
+	res, err := kit.Call(context.Background(), capkit.Call{Tool: "oast_get_domain", Input: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Summary, "申请到 dnslog 回连域名 abc.dnslog.cn") {
+		t.Fatalf("domain summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "oast_get_domain" || res.Meta.Version != "0.1.0" {
+		t.Fatalf("meta = %+v", res.Meta)
+	}
+
+	res, err = kit.Call(context.Background(), capkit.Call{
+		Tool:  "oast_get_records",
+		Input: json.RawMessage(`{"domain":"abc.dnslog.cn"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Summary, "查询 abc.dnslog.cn 的 DNS 交互记录，命中 2 条") {
+		t.Fatalf("records summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "oast_get_records" {
+		t.Fatalf("meta = %+v", res.Meta)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -187,6 +188,124 @@ func TestWAFBlockSurfacesError(t *testing.T) {
 	})
 	if res.OK || res.Error == nil || !strings.Contains(res.Error.Message, "创宇盾") {
 		t.Fatalf("应识别创宇盾拦截: %+v", res)
+	}
+}
+
+// ---- 输出契约：Summary 与信封 ----
+
+// TestQuerySummarySuccess 成功路径：Summary 必须点名目标、动作与关键结果，
+// Meta.Tool 必须等于工具名，且处于六态之内。
+func TestQuerySummarySuccess(t *testing.T) {
+	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
+	res, err := kit.Call(context.Background(), capkit.Call{
+		Tool:  "icp_query",
+		Input: json.RawMessage(`{"query":"baidu.com"}`),
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Status != capkit.StatusSuccess || !res.OK {
+		t.Fatalf("status=%s ok=%v", res.Status, res.OK)
+	}
+	if res.Meta.Tool != "icp_query" || res.Meta.Version != kitVersion {
+		t.Fatalf("meta = %+v", res.Meta)
+	}
+	for _, want := range []string{"baidu.com", "主办单位", "北京百度网讯科技有限公司"} {
+		if !strings.Contains(res.Summary, want) {
+			t.Errorf("Summary %q 缺少 %q", res.Summary, want)
+		}
+	}
+	if len([]rune(res.Summary)) > capkit.MaxSummaryRunes {
+		t.Errorf("Summary 超过 %d rune: %q", capkit.MaxSummaryRunes, res.Summary)
+	}
+}
+
+// TestQuerySummaryWithLicence 结果含备案号时，Summary 应带出主办单位与备案号。
+func TestQuerySummaryWithLicence(t *testing.T) {
+	ff := defaultFetcher()
+	ff.responses[queryByCondition] = `{"success":true,"code":200,"params":{"list":[
+		{"unitName":"某某科技有限公司","serviceLicence":"京ICP备00000000号-1"}
+	]}}`
+	kit := New(capkit.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), capkit.Call{
+		Tool:  "icp_query",
+		Input: json.RawMessage(`{"query":"example.com"}`),
+	})
+	want := "查询 example.com 的 ICP 备案：主办单位 某某科技有限公司，备案号 京ICP备00000000号-1"
+	if res.Summary != want {
+		t.Fatalf("Summary = %q, want %q", res.Summary, want)
+	}
+}
+
+// TestQuerySummaryEmpty 空结果：Summary 必须明说未查到，而不是空白或泛化短语。
+func TestQuerySummaryEmpty(t *testing.T) {
+	ff := defaultFetcher()
+	ff.responses[queryByCondition] = `{"success":true,"code":200,"params":{"total":0,"list":[]}}`
+	kit := New(capkit.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), capkit.Call{
+		Tool:  "icp_query",
+		Input: json.RawMessage(`{"query":"nonexistent.example"}`),
+	})
+	if !res.OK {
+		t.Fatalf("空结果仍应是成功信封: %+v", res)
+	}
+	if res.Summary != "nonexistent.example 未查到备案" {
+		t.Fatalf("Summary = %q", res.Summary)
+	}
+	if res.Meta.Tool != "icp_query" {
+		t.Fatalf("Meta.Tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestTypesSummary icp_types 的 Summary 必须说明实际返回了多少种类型。
+func TestTypesSummary(t *testing.T) {
+	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
+	res, err := kit.Call(context.Background(), capkit.Call{Tool: "icp_types"})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	want := fmt.Sprintf("返回 %d 种 ICP 主体类型", len(TypeCatalog()))
+	if res.Status != capkit.StatusSuccess || res.Summary != want {
+		t.Fatalf("status=%s summary=%q want %q", res.Status, res.Summary, want)
+	}
+	if res.Meta.Tool != "icp_types" {
+		t.Fatalf("Meta.Tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestUnavailableSummary 不可用路径：创宇盾拦截必须落成 unavailable，且带可读
+// Summary 与固定枚举内的 Error.Code。
+func TestUnavailableSummary(t *testing.T) {
+	ff := defaultFetcher()
+	ff.responses[authEndpoint] = `<html>当前访问疑似黑客攻击</html>`
+	kit := New(capkit.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), capkit.Call{
+		Tool:  "icp_query",
+		Input: json.RawMessage(`{"query":"baidu.com"}`),
+	})
+	if res.Status != capkit.StatusUnavailable || res.OK {
+		t.Fatalf("status=%s ok=%v", res.Status, res.OK)
+	}
+	if res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+		t.Fatalf("error = %+v", res.Error)
+	}
+	if strings.TrimSpace(res.Summary) == "" {
+		t.Fatalf("unavailable 路径 Summary 不得为空")
+	}
+	if res.Meta.Tool != "icp_query" {
+		t.Fatalf("Meta.Tool = %q", res.Meta.Tool)
+	}
+}
+
+// TestUnknownToolEnvelope 未知工具：信封仍须完整（Status/Meta.Summary）。
+func TestUnknownToolEnvelope(t *testing.T) {
+	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
+	res, _ := kit.Call(context.Background(), capkit.Call{Tool: "nope"})
+	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+		t.Fatalf("未知工具应报 not_found: %+v", res)
+	}
+	if res.Meta.Tool != "nope" || strings.TrimSpace(res.Summary) == "" {
+		t.Fatalf("未知工具信封不完整: %+v", res)
 	}
 }
 

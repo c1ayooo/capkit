@@ -137,3 +137,38 @@ func TestFailResultCarriesStatus(t *testing.T) {
 		t.Fatal("blocked result needs summary and error")
 	}
 }
+
+// TestNormalizeStampsEveryReturnPath locks the helper kits call once in their
+// dispatcher: whatever a handler returned, the envelope that leaves the kit has
+// a valid Status, a consistent OK, and a Meta naming the tool.
+func TestNormalizeStampsEveryReturnPath(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         capkit.Result
+		wantStatus capkit.Status
+		wantOK     bool
+	}{
+		{"zero value fails closed", capkit.Result{}, capkit.StatusFailed, false},
+		{"legacy ok only", capkit.Result{OK: true}, capkit.StatusSuccess, true},
+		{"error drives status", capkit.Result{Error: capkit.ScopeDenied("x")}, capkit.StatusBlocked, false},
+		{"explicit status wins", capkit.Result{OK: true, Status: capkit.StatusPartial}, capkit.StatusPartial, true},
+		{"stale ok is corrected", capkit.Result{OK: true, Error: capkit.Unavailable("x")}, capkit.StatusUnavailable, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.in.Normalize("http_probe", "0.1.0")
+			if got.Status != tc.wantStatus || got.OK != tc.wantOK {
+				t.Fatalf("status/ok = %s/%v, want %s/%v", got.Status, got.OK, tc.wantStatus, tc.wantOK)
+			}
+			if got.Meta.Tool != "http_probe" || got.Meta.Version != "0.1.0" {
+				t.Fatalf("meta = %+v", got.Meta)
+			}
+		})
+	}
+	// A call that already named its tool keeps that name (the runtime's
+	// back-fill must never overwrite a kit that got there first).
+	kept := capkit.Result{Meta: capkit.Meta{Tool: "other"}}.Normalize("http_probe", "v")
+	if kept.Meta.Tool != "other" {
+		t.Fatalf("existing Meta.Tool was overwritten: %+v", kept.Meta)
+	}
+}

@@ -119,7 +119,17 @@ type executeInput struct {
 	Options     map[string]any `json:"options"`
 }
 
+// kitVersion mirrors the Manifest Version; Normalize stamps it into Meta.
+const kitVersion = "0.1.0"
+
+// Call is the envelope shell: every return path from dispatch is normalized so
+// Status/OK/Meta and a clamped Summary hold on success and failure alike.
 func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+	res, err := k.dispatch(ctx, call)
+	return res.Normalize(call.Tool, kitVersion), err
+}
+
+func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
 	switch call.Tool {
 	case "verify_plan":
 		return k.plan(ctx, call)
@@ -166,15 +176,29 @@ func (k *Kit) plan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 		Engine string `json:"engine,omitempty"`
 	}
 	cands := make([]candidate, 0, len(refs))
+	highRisk := 0
 	for _, ref := range refs {
 		cands = append(cands, candidate{ID: ref.ID, Name: ref.Name, Kind: ref.Kind, Engine: ref.Engine})
+		if isHighSeverity(ref.Meta["severity"]) {
+			highRisk++
+		}
 	}
 	out := map[string]any{
 		"target": target, "fingerprints": fps, "products": unique(products),
 		"candidates": cands, "count": len(cands),
 	}
-	res, _ := capkit.DataResult(out)
-	return res, nil
+	summary := fmt.Sprintf("按 %d 个指纹为 %s 规划 %d 个模板（高危 %d 个）",
+		len(fps), strings.TrimSpace(in.Target), len(cands), highRisk)
+	return capkit.SuccessResult(summary, out)
+}
+
+// isHighSeverity reports whether a template meta severity counts as high risk.
+func isHighSeverity(sev string) bool {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "high", "critical":
+		return true
+	}
+	return false
 }
 
 func (k *Kit) execute(ctx context.Context, call capkit.Call) (capkit.Result, error) {
@@ -210,19 +234,29 @@ func (k *Kit) execute(ctx context.Context, call capkit.Call) (capkit.Result, err
 		return capkit.FailResult(capkit.NotFound("templates not found: " + strings.Join(missing, ", "))), nil
 	}
 	results := make([]map[string]any, 0, len(byKind))
+	hits, confirmed := 0, 0
 	for kind, refs := range byKind {
 		engine, ok := k.engines[kind]
 		if !ok {
 			return capkit.FailResult(capkit.Unavailable("no template engine for kind " + kind)), nil
 		}
-		res, err := engine.Execute(ctx, refs, target, in.Options)
+		engineRes, err := engine.Execute(ctx, refs, target, in.Options)
 		if err != nil {
 			return capkit.FailResult(err), nil
 		}
-		results = append(results, map[string]any{"kind": kind, "result": res})
+		hits += len(engineRes.Findings)
+		for _, f := range engineRes.Findings {
+			if f.Confirmed {
+				confirmed++
+			}
+		}
+		results = append(results, map[string]any{"kind": kind, "result": engineRes})
 	}
-	out, _ := capkit.DataResult(map[string]any{"target": target, "results": results, "engine_count": len(results)})
-	return out, nil
+	summary := fmt.Sprintf("对 %s 执行 %d 个模板，命中 %d 项，其中确认 %d 项",
+		strings.TrimSpace(in.Target), len(in.TemplateIDs), hits, confirmed)
+	return capkit.SuccessResult(summary, map[string]any{
+		"target": target, "results": results, "engine_count": len(results),
+	})
 }
 
 func unique(in []string) []string {
