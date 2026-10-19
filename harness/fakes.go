@@ -42,6 +42,12 @@ type HTTP struct {
 	Default Route
 	// Routes are checked in order before Default.
 	Routes []Route
+	// Queue answers the first len(Queue) calls in order, before Routes and
+	// Default apply, and is consumed as it is used. It exists for protocol-level
+	// sequences a route table cannot express — "the invocation does not exist
+	// yet on the first poll, succeeds on the second" — where the answer depends
+	// on how many calls came before rather than on the request itself.
+	Queue []Route
 	// Err fails every call regardless of routes.
 	Err error
 
@@ -68,15 +74,23 @@ func (h *HTTP) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response,
 func (h *HTTP) respond(_ context.Context, req capkit.Request) (*capkit.Response, error) {
 	h.mu.Lock()
 	h.requests = append(h.requests, req)
+	var route Route
+	queued := false
+	if len(h.Queue) > 0 {
+		route, h.Queue = h.Queue[0], h.Queue[1:]
+		queued = true
+	}
 	h.mu.Unlock()
 	if h.Err != nil {
 		return nil, h.Err
 	}
-	route := h.Default
-	for _, r := range h.Routes {
-		if r.Match != "" && strings.Contains(req.URL, r.Match) {
-			route = r
-			break
+	if !queued {
+		route = h.Default
+		for _, r := range h.Routes {
+			if r.Match != "" && strings.Contains(req.URL, r.Match) {
+				route = r
+				break
+			}
 		}
 	}
 	if route.Err != nil {

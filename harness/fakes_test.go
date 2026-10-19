@@ -39,6 +39,34 @@ func TestFakeHTTPAnswersFromRoutes(t *testing.T) {
 	}
 }
 
+// TestFakeHTTPQueueBeatsRoutes covers the ordered-answer mode: a peer that
+// answers differently on its first poll than on its second cannot be expressed
+// with a route table, so a queued answer must win over both Routes and Default —
+// and then hand control back once the queue is spent.
+func TestFakeHTTPQueueBeatsRoutes(t *testing.T) {
+	h := NewHTTP(200, "settled")
+	h.Routes = []Route{{Match: "/poll", Body: "routed"}}
+	h.Queue = []Route{{Body: "not-yet"}}
+
+	first, err := h.Do(context.Background(), capkit.Request{URL: "https://t.example/poll"})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if string(first.Body) != "not-yet" {
+		t.Fatalf("queued body = %q, want not-yet", first.Body)
+	}
+	second, err := h.Do(context.Background(), capkit.Request{URL: "https://t.example/poll"})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if string(second.Body) != "routed" {
+		t.Fatalf("body after the queue drained = %q, want the route answer", second.Body)
+	}
+	if len(h.Queue) != 0 {
+		t.Fatalf("queue not drained: %+v", h.Queue)
+	}
+}
+
 // TestFakeHTTPError covers the failure path a kit must turn into a Result.
 func TestFakeHTTPError(t *testing.T) {
 	h := NewHTTP(200, "")

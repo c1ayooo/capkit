@@ -30,6 +30,24 @@ import boundaries 全绿，**契约覆盖 81 工具**（76 + cloudkit 5），达
 仍由并行会话持有，本会话未跟踪、未提交。`scripts/` 两项由并行会话写入，
 本会话核实其正确性（曾一度因白名单匹配逻辑两次报红，12:00 已修复并通过）。
 
+**2026-10-19 12:2x 追加（云 kit 测试补齐与一处门禁缺陷修复，尚未提交）**：
+
+- 覆盖率：`kits/cloudkit` **54.2% → 83.2%**（`httpkit` 90.3%、`adapters/httpx` 92.1%
+  不变）。新增 `kits/cloudkit/aws_test.go`（964 行）与 `kits/cloudkit/cloudkit_test.go`
+  （662 行）：前者按厂商线格式喂 XML/JSON 给注入的 `HTTPDoer`，覆盖 AWS 五个方法、
+  分页续取、部分失败、SSM 轮询竞态与错误分类；后者走 `Kit.Call` 覆盖工具信封本身
+  （Summary 计数与脱敏、部分态、证据转存、高风险声明、输入门禁、四家厂商统一矩阵）。
+- **修掉一个门禁缺陷**：`classifyAWS` 会把宿主 `HTTPDoer` 抛出的 `scope_denied` /
+  `rate_limited` 一律重分类成 `upstream_error`（且标 retryable），于是越权调用在 agent
+  看来是「可重试的云端故障」。修法与阿里云已有的 `aliyunError` 一致：新增 `awsError`
+  包装，先 `asCapkitError` 透传宿主错误码，分类只处理真正的厂商失败。
+  `TestKitGateErrorsSurviveClassification` 对四家厂商 × 四类门禁错误逐一断言。
+- `harness.HTTP` 增加 `Queue []Route`：按调用次序应答，用于「第一次轮询不存在、第二次
+  成功」这类路由表表达不了的协议序列（`harness/fakes_test.go` 有对应用例）。
+- 未提交改动：`harness/fakes.go`、`harness/fakes_test.go`、`kits/cloudkit/aws.go` 修改，
+  `kits/cloudkit/aws_test.go`、`kits/cloudkit/cloudkit_test.go` 新增。
+  `bash scripts/verify.sh` 仍 PASSED，契约 81 工具 0 失败。
+
 更新时间：2026-10-19
 
 ## 一、项目目标（不可漂移）
@@ -111,8 +129,8 @@ bash scripts/verify.sh
 
 - [ ] **四家云真实凭据验证**（M1 唯一未达标项）：在具备真实 AK/SK 的机器上，对
   AWS / 阿里云 / 腾讯云 / 华为云各跑通一次 `cloud_ak_verify` 与 `cloud_asset_list`。
-- [ ] **`docs/STATUS.md` 补 cloudkit 段**：该文件当前完全没有 cloudkit 条目，
-  归并行会话修改，本会话未跟踪、未提交。
+- [x] `docs/STATUS.md` 补 cloudkit 段（云能力清单、只读边界、华为云诚实缺口、AK 脱敏）
+  ——已随 d787cc0 提交，`docs/STATUS.md` 与 README 均含「四家云未用真实凭据跑过」
 - [ ] v2 扩展七项（云控制台接管、容器逃逸执行、跳板机深度采集、隧道自动搭建、反序列化验证、AD 域利用、C2 接入），详见文档第十章
 
 > 红线 4 的白名单机制（2026-10-19 复核）：`scripts/check-imports.sh` 原有两关
