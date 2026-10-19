@@ -315,6 +315,13 @@ func (f *FormFlow) Login(ctx context.Context, creds capkit.Credentials) (capkit.
 	}
 
 	method := strings.ToUpper(capkit.FirstNonEmpty(f.Method, "POST"))
+	// The login page may have set a session cookie that the CSRF token is bound
+	// to (Django, Laravel, Rails, PHP all do this). Sending the form without that
+	// cookie is what a browser would never do, and the server rejects it as
+	// "bad csrf" — so the jar's cookies go out with the POST, not just the fields.
+	if h, herr := id.Headers(ctx); herr == nil && h.Get("Cookie") != "" {
+		headers["Cookie"] = h.Get("Cookie")
+	}
 	res, err := f.HTTP.Do(ctx, capkit.Request{
 		Method: method, URL: f.LoginURL, Headers: headers,
 		Body: []byte(form.Encode()), Timeout: 30 * time.Second,

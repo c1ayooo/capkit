@@ -19,6 +19,10 @@ import (
 // session is used identically.
 type Capability struct {
 	deps capkit.Deps
+	// deployer is the host boundary for webshell_deploy. It is optional: a host
+	// that only drives existing sessions leaves it nil, and the tool reports
+	// tool_missing rather than pretending to have a delivery channel.
+	deployer WebShellDeployer
 }
 
 // NewCapability builds the session capability.
@@ -26,7 +30,15 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
-// Manifest declares the session tools.
+// NewCapabilityWithDeployer builds the session capability with a host-supplied
+// delivery channel, which is what enables webshell_deploy. The deployer cannot
+// ride in capkit.Deps because it is shellkit-specific (the same reason
+// enterprisekit takes its resolver separately).
+func NewCapabilityWithDeployer(deps capkit.Deps, deployer WebShellDeployer) (capkit.Capability, error) {
+	return &Capability{deps: deps, deployer: deployer}, nil
+}
+
+// Manifest declares the session and delivery tools.
 func Manifest() capkit.Manifest {
 	return capkit.Manifest{
 		Name: "shellkit", Version: "0.3.0", APIVersion: "v1",
@@ -34,6 +46,7 @@ func Manifest() capkit.Manifest {
 		Tools: []capkit.ToolSpec{
 			sessionOpenSpec(), sessionExecSpec(), sessionUploadSpec(),
 			sessionDownloadSpec(), tunnelOpenSpec(), sessionListSpec(), sessionCloseSpec(),
+			webshellDeploySpec(),
 		},
 	}
 }
@@ -58,6 +71,8 @@ func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result,
 		return c.list(ctx, call)
 	case "session_close":
 		return c.close(ctx, call)
+	case "webshell_deploy":
+		return c.deploy(ctx, call)
 	default:
 		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
 	}

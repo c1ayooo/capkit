@@ -138,6 +138,20 @@ func RegisterSession(reg *capkit.Registry) error {
 	return reg.Add(capkit.Spec{Manifest: shellkit.Manifest(), New: shellkit.NewCapability})
 }
 
+// RegisterSessionWithDeployer registers the session tools plus webshell_deploy,
+// which needs a host delivery channel. The deployer is a shellkit type, so it
+// cannot ride in capkit.Deps — the same reason RegisterEnterprise takes a
+// resolver. Use this when the host has a way to drop a shell on a target;
+// RegisterSession alone leaves webshell_deploy reporting tool_missing.
+func RegisterSessionWithDeployer(reg *capkit.Registry, deployer shellkit.WebShellDeployer) error {
+	return reg.Add(capkit.Spec{
+		Manifest: shellkit.Manifest(),
+		New: func(deps capkit.Deps) (capkit.Capability, error) {
+			return shellkit.NewCapabilityWithDeployer(deps, deployer)
+		},
+	})
+}
+
 // RegisterPostExploitation registers the five session-driven kits: privesckit
 // (enumeration + advice), internalnetkit, persistkit, cleanupkit and avkit
 // (AV/EDR identification). Every one of them resolves its target from

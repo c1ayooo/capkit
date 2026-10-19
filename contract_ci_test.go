@@ -296,7 +296,9 @@ var kitRegistration = map[string]func(*capkit.Registry) error{
 // argKitRegistration covers the kits whose registration helper takes a
 // host-supplied collaborator, so they cannot be values in kitRegistration. They
 // are pinned here with the minimal legal argument: an empty identity flow
-// registry, and a resolver that reports everything unconfigured.
+// registry, a resolver that reports everything unconfigured, and a session kit
+// with no delivery channel (which leaves webshell_deploy reporting
+// tool_missing — the honest result for a host that cannot drop a shell).
 var argKitRegistration = map[string]func(*capkit.Registry) error{
 	"identitykit": func(reg *capkit.Registry) error {
 		return all.RegisterIdentity(reg, identitykit.NewAuthFlowRegistry())

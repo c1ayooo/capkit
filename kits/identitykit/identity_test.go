@@ -126,6 +126,7 @@ func TestTokenSnapshotNeedsRefresh(t *testing.T) {
 
 func TestFormFlowLogin(t *testing.T) {
 	var gotBody string
+	var gotCookie string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			http.SetCookie(w, &http.Cookie{Name: "pre", Value: "1"})
@@ -135,6 +136,7 @@ func TestFormFlowLogin(t *testing.T) {
 		buf := make([]byte, r.ContentLength)
 		_, _ = r.Body.Read(buf)
 		gotBody = string(buf)
+		gotCookie = r.Header.Get("Cookie")
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "sess1"})
 		_, _ = w.Write([]byte("welcome"))
 	}))
@@ -155,6 +157,13 @@ func TestFormFlowLogin(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, "csrf_token=tok") {
 		t.Fatalf("csrf token not submitted: %q", gotBody)
+	}
+	// A CSRF token is normally bound to the session cookie the login page just
+	// set (PHP, Django, Rails all do this), so the POST must carry the jar's
+	// cookies. Without them the server answers "bad csrf" and the login can never
+	// succeed — which is exactly the bug this assertion pins.
+	if !strings.Contains(gotCookie, "pre=1") {
+		t.Fatalf("the login POST did not carry the page's cookie: %q", gotCookie)
 	}
 	h, _ := id.Headers(context.Background())
 	if !strings.Contains(h.Get("Cookie"), "session=sess1") {

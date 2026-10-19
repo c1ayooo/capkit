@@ -42,3 +42,5 @@ jobs:
           go run ./examples/minimal
           go run ./examples/verify-chain
           go run ./examples/session
+          go run ./examples/webshell-chain
+          go run ./examples/identity-login

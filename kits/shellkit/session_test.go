@@ -197,12 +197,32 @@ func TestSessionMissingManagerFailsClosed(t *testing.T) {
 
 func TestSessionToolsRegisteredWithSchemas(t *testing.T) {
 	m := shellkit.Manifest()
-	if len(m.Tools) != 7 {
-		t.Fatalf("tools = %d, want 7", len(m.Tools))
+	// 7 session tools + webshell_deploy (M2-4).
+	if len(m.Tools) != 8 {
+		t.Fatalf("tools = %d, want 8", len(m.Tools))
 	}
+	names := map[string]bool{}
 	for _, tool := range m.Tools {
 		if len(tool.InputSchema) == 0 || len(tool.OutputSchema) == 0 {
 			t.Fatalf("%s missing schema", tool.Name)
+		}
+		if names[tool.Name] {
+			t.Fatalf("duplicate tool %q", tool.Name)
+		}
+		names[tool.Name] = true
+	}
+	for _, want := range []string{
+		"session_open", "session_exec", "session_upload", "session_download",
+		"tunnel_open", "session_list", "session_close", "webshell_deploy",
+	} {
+		if !names[want] {
+			t.Fatalf("missing tool %q", want)
+		}
+	}
+	// webshell_deploy writes executable content, so it must be approval-gated.
+	for _, tool := range m.Tools {
+		if tool.Name == "webshell_deploy" && tool.Risk != capkit.RiskHigh {
+			t.Fatalf("webshell_deploy risk = %q, want high", tool.Risk)
 		}
 	}
 	_ = httptest.NewServer // keep httptest import available for future cases
