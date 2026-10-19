@@ -163,14 +163,14 @@ func TestAWSVerifyMissingCredential(t *testing.T) {
 
 func TestAWSIdentityType(t *testing.T) {
 	cases := map[string]string{
-		"arn:aws:iam::1:root":                       "root_account",
-		"arn:aws:iam::1:user/alice":                 "iam_user",
-		"arn:aws:sts::1:assumed-role/role/session":  "assumed_role",
-		"arn:aws:sts::1:federated-user/bob":         "federated_user",
-		"arn:aws:iam::1:role/service-role/app":      "iam_role",
-		"arn:aws:iam::1:group/admins":               "group/admins",
-		"":                                          "",
-		"arn:aws:iam":                               "",
+		"arn:aws:iam::1:root":                      "root_account",
+		"arn:aws:iam::1:user/alice":                "iam_user",
+		"arn:aws:sts::1:assumed-role/role/session": "assumed_role",
+		"arn:aws:sts::1:federated-user/bob":        "federated_user",
+		"arn:aws:iam::1:role/service-role/app":     "iam_role",
+		"arn:aws:iam::1:group/admins":              "group/admins",
+		"":                                         "",
+		"arn:aws:iam":                              "",
 	}
 	for arn, want := range cases {
 		if got := awsIdentityType(arn); got != want {

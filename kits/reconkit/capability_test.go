@@ -59,7 +59,7 @@ func TestReconEnvelopeSuccess(t *testing.T) {
 		Scope: gates.StaticScope("example.com"), Limiter: gates.NewLimiter(),
 	}
 	res, err := reconCapability(t, p).Call(context.Background(), capkit.Call{
-		Tool: "recon_run",
+		Tool:  "recon_run",
 		Input: []byte(`{"domains":["example.com"],"enable_subdomain":true,"enable_http":true}`),
 	})
 	if err != nil {

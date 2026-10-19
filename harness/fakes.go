@@ -374,7 +374,7 @@ func (s *Settings) GetInt(_ context.Context, key string) (int64, bool) {
 // never be used outside a test.
 type Sealer struct{ Key byte }
 
-func (s Sealer) Seal(plain string) (string, error) { return s.xor(plain), nil }
+func (s Sealer) Seal(plain string) (string, error)  { return s.xor(plain), nil }
 func (s Sealer) Open(sealed string) (string, error) { return s.xor(sealed), nil }
 
 func (s Sealer) xor(in string) string {
@@ -673,7 +673,7 @@ type CloudSigner struct {
 	AccessKey string
 	Err       error
 
-	mu    sync.Mutex
+	mu     sync.Mutex
 	signed []CloudSignRequest
 }
 

@@ -83,11 +83,11 @@ func TestAliyunVerifyOffline(t *testing.T) {
 
 func TestAliyunIdentityType(t *testing.T) {
 	cases := map[string]string{
-		"acs:ram::123456:root":                 "root_account",
-		"acs:ram::123456:user/alice":           "ram_user",
-		"acs:ram::123456:role/deploy":          "ram_role",
+		"acs:ram::123456:root":                  "root_account",
+		"acs:ram::123456:user/alice":            "ram_user",
+		"acs:ram::123456:role/deploy":           "ram_role",
 		"acs:ram::123456:assumed-role/deploy/x": "assumed_role",
-		"acs:ram::123456:group/devs":           "ram_group",
+		"acs:ram::123456:group/devs":            "ram_group",
 	}
 	for arn, want := range cases {
 		if got := aliyunIdentityType(arn); got != want {
