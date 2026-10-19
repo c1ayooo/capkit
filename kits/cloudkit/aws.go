@@ -75,7 +75,7 @@ func (p *awsProvider) Verify(ctx context.Context, creds Credentials) (Identity, 
 	}
 	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
-		return Identity{}, classifyAWS(err)
+		return Identity{}, awsError(err)
 	}
 	arn := awssdk.ToString(out.Arn)
 	return Identity{
@@ -164,7 +164,7 @@ func (p *awsProvider) ec2Instances(ctx context.Context, cfg awssdk.Config, req A
 	}
 	out, err := ec2.NewFromConfig(cfg).DescribeInstances(ctx, in)
 	if err != nil {
-		return nil, "", classifyAWS(err)
+		return nil, "", awsError(err)
 	}
 	var instances []Instance
 	for _, reservation := range out.Reservations {
@@ -199,7 +199,7 @@ func (p *awsProvider) rdsInstances(ctx context.Context, cfg awssdk.Config, req A
 	}
 	out, err := rds.NewFromConfig(cfg).DescribeDBInstances(ctx, in)
 	if err != nil {
-		return nil, "", classifyAWS(err)
+		return nil, "", awsError(err)
 	}
 	var instances []Instance
 	for _, db := range out.DBInstances {
@@ -243,7 +243,7 @@ func (p *awsProvider) ListIAM(ctx context.Context, creds Credentials, req IAMReq
 		case "users":
 			out, err := client.ListUsers(ctx, &iam.ListUsersInput{MaxItems: awssdk.Int32(int32(clampMax(req.MaxResults)))})
 			if err != nil {
-				page.Warnings = append(page.Warnings, "子用户列举失败："+reasonLabel(classifyAWS(err)))
+				page.Warnings = append(page.Warnings, "子用户列举失败："+reasonLabel(awsError(err)))
 				continue
 			}
 			for _, u := range out.Users {
@@ -260,7 +260,7 @@ func (p *awsProvider) ListIAM(ctx context.Context, creds Credentials, req IAMReq
 				MaxItems: awssdk.Int32(int32(clampMax(req.MaxResults))),
 			})
 			if err != nil {
-				page.Warnings = append(page.Warnings, "策略列举失败："+reasonLabel(classifyAWS(err)))
+				page.Warnings = append(page.Warnings, "策略列举失败："+reasonLabel(awsError(err)))
 				continue
 			}
 			for _, pol := range out.Policies {
@@ -277,7 +277,7 @@ func (p *awsProvider) ListIAM(ctx context.Context, creds Credentials, req IAMReq
 				MaxItems: awssdk.Int32(int32(clampMax(req.MaxResults))),
 			})
 			if err != nil {
-				page.Warnings = append(page.Warnings, "AccessKey 列举失败："+reasonLabel(classifyAWS(err)))
+				page.Warnings = append(page.Warnings, "AccessKey 列举失败："+reasonLabel(awsError(err)))
 				continue
 			}
 			for _, key := range out.AccessKeyMetadata {
@@ -327,7 +327,7 @@ func (p *awsProvider) ListStorage(ctx context.Context, creds Credentials, req St
 	if strings.TrimSpace(req.Bucket) == "" {
 		out, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
 		if err != nil {
-			return StoragePage{}, classifyAWS(err)
+			return StoragePage{}, awsError(err)
 		}
 		var page StoragePage
 		for _, b := range out.Buckets {
@@ -352,7 +352,7 @@ func (p *awsProvider) ListStorage(ctx context.Context, creds Credentials, req St
 	}
 	out, err := client.ListObjectsV2(ctx, in)
 	if err != nil {
-		return StoragePage{}, classifyAWS(err)
+		return StoragePage{}, awsError(err)
 	}
 	var page StoragePage
 	for _, obj := range out.Contents {
@@ -387,7 +387,7 @@ func (p *awsProvider) RunCommand(ctx context.Context, creds Credentials, req Com
 		TimeoutSeconds: awssdk.Int32(timeout),
 	})
 	if err != nil {
-		return CommandResult{}, classifyAWS(err)
+		return CommandResult{}, awsError(err)
 	}
 	commandID := awssdk.ToString(sent.Command.CommandId)
 	result := CommandResult{InstanceID: req.InstanceID, CommandID: commandID, Status: awssdk.ToString(sent.Command.StatusDetails)}
@@ -401,11 +401,11 @@ func (p *awsProvider) RunCommand(ctx context.Context, creds Credentials, req Com
 			var apiErr smithy.APIError
 			if errors.As(ierr, &apiErr) && apiErr.ErrorCode() == "InvocationDoesNotExist" {
 				if werr := waitFor(ctx, commandPollInterval); werr != nil {
-					return result, classifyAWS(werr)
+					return result, awsError(werr)
 				}
 				continue
 			}
-			return result, classifyAWS(ierr)
+			return result, awsError(ierr)
 		}
 		result.Status = string(inv.Status)
 		result.ExitCode = int(inv.ResponseCode)
@@ -415,7 +415,7 @@ func (p *awsProvider) RunCommand(ctx context.Context, creds Credentials, req Com
 			return result, nil
 		}
 		if werr := waitFor(ctx, commandPollInterval); werr != nil {
-			return result, classifyAWS(werr)
+			return result, awsError(werr)
 		}
 	}
 }
@@ -486,6 +486,10 @@ var awsFallback = []matchRule{
 // classifyAWS turns an SDK error into a normalized *Error. The AWS SDK exposes
 // the service error code through smithy.APIError, so no string parsing is needed
 // for the documented cases.
+//
+// A failure raised by the host's own gates never reaches this function: awsError
+// checks for it first, because a scope denial classified as "upstream_error,
+// retryable" would invite exactly the retry the gate exists to refuse.
 func classifyAWS(err error) *Error {
 	if err == nil {
 		return nil
@@ -499,6 +503,20 @@ func classifyAWS(err error) *Error {
 		code, message = apiErr.ErrorCode(), apiErr.ErrorMessage()
 	}
 	return newError(reasonFor(code, message, awsReasons, awsFallback), ProviderAWS, code, message, "")
+}
+
+// awsError classifies a vendor error but lets a failure raised by capkit itself
+// (scope_denied / rate_limited / timeout from the host's HTTPDoer) pass through
+// verbatim, so cloudkit.go's k.failure keeps the host's own error code instead
+// of re-labelling it an upstream cloud failure.
+func awsError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if ce := asCapkitError(err); ce != nil {
+		return ce
+	}
+	return classifyAWS(err)
 }
 
 // ────────────────────────── small shared helpers ──────────────────────────
