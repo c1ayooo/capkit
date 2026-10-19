@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // The runtime counts every outbound request a tool makes so the envelope can
@@ -37,17 +37,17 @@ func requestCount(ctx context.Context) int {
 }
 
 // countingHTTP wraps an HTTPDoer so every call is counted for the live call.
-type countingHTTP struct{ inner capkit.HTTPDoer }
+type countingHTTP struct{ inner core.HTTPDoer }
 
-func (h countingHTTP) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (h countingHTTP) Do(ctx context.Context, req core.Request) (*core.Response, error) {
 	countRequest(ctx)
 	return h.inner.Do(ctx, req)
 }
 
 // countingFetcher wraps a Fetcher so external-data fetches are counted too.
-type countingFetcher struct{ inner capkit.Fetcher }
+type countingFetcher struct{ inner core.Fetcher }
 
-func (f countingFetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f countingFetcher) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
 	countRequest(ctx)
 	return f.inner.Fetch(ctx, req)
 }

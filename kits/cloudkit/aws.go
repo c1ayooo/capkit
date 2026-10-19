@@ -21,7 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // awsProvider talks to AWS through aws-sdk-go-v2. Signing (SigV4) is entirely
@@ -558,8 +558,8 @@ func clampMax(v int) int {
 	if v <= 0 {
 		return defaultPageSize
 	}
-	if v > capkit.MaxListItems {
-		return capkit.MaxListItems
+	if v > core.MaxListItems {
+		return core.MaxListItems
 	}
 	return v
 }

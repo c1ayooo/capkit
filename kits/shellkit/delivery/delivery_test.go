@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/shellkit/plan"
 )
 
-func capTargetForTest() capkit.Target {
-	return capkit.Target{Kind: capkit.TargetURL, URL: "http://target/"}
+func capTargetForTest() core.Target {
+	return core.Target{Kind: core.TargetURL, URL: "http://target/"}
 }
 
 type fakeSink struct {

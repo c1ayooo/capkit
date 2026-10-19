@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/httpx"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 )
 
@@ -18,8 +18,8 @@ func TestClientOK(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	ctx := capkit.WithCallContext(context.Background(), capkit.CallContext{ProjectID: 1})
-	res, err := c.Do(ctx, capkit.Request{URL: srv.URL})
+	ctx := core.WithCallContext(context.Background(), core.CallContext{ProjectID: 1})
+	res, err := c.Do(ctx, core.Request{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,9 +30,9 @@ func TestClientOK(t *testing.T) {
 
 func TestClientRejectsOutOfScope(t *testing.T) {
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	ctx := capkit.WithCallContext(context.Background(), capkit.CallContext{ProjectID: 1})
-	_, err := c.Do(ctx, capkit.Request{URL: "http://example.com/"})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeScopeDenied) {
+	ctx := core.WithCallContext(context.Background(), core.CallContext{ProjectID: 1})
+	_, err := c.Do(ctx, core.Request{URL: "http://example.com/"})
+	if err == nil || !strings.Contains(err.Error(), core.CodeScopeDenied) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -43,8 +43,8 @@ func TestClientRejectsOutOfScopeRedirect(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	ctx := capkit.WithCallContext(context.Background(), capkit.CallContext{ProjectID: 1})
-	_, err := c.Do(ctx, capkit.Request{URL: srv.URL})
+	ctx := core.WithCallContext(context.Background(), core.CallContext{ProjectID: 1})
+	_, err := c.Do(ctx, core.Request{URL: srv.URL})
 	if err == nil || !strings.Contains(err.Error(), "scope_denied") {
 		t.Fatalf("err = %v", err)
 	}

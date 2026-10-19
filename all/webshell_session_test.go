@@ -12,9 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
@@ -104,7 +104,7 @@ func (w *webShellServer) execs() []string {
 // HTTPDoer: this is the "host must implement the actual command/file operation"
 // boundary from shellkit's README, done the way a real host would.
 type shellExecutor struct {
-	doer capkit.HTTPDoer
+	doer core.HTTPDoer
 	base string
 	pass string
 }
@@ -114,7 +114,7 @@ func (e *shellExecutor) call(ctx context.Context, op string, params map[string]s
 	for k, v := range params {
 		q.Set(k, v)
 	}
-	resp, err := e.doer.Do(ctx, capkit.Request{
+	resp, err := e.doer.Do(ctx, core.Request{
 		Method: http.MethodGet, URL: e.base + "/w.php?" + q.Encode(),
 	})
 	if err != nil {
@@ -153,8 +153,8 @@ func webshellRuntime(t *testing.T, shellURL string) *runtime.Runtime {
 	if err := all.RegisterWebShellOpener(manager, exec); err != nil {
 		t.Fatalf("RegisterWebShellOpener: %v", err)
 	}
-	reg := capkit.NewRegistry()
-	if err := reg.Add(capkit.Spec{Manifest: shellkit.Manifest(), New: shellkit.NewCapability}); err != nil {
+	reg := core.NewRegistry()
+	if err := reg.Add(core.Spec{Manifest: shellkit.Manifest(), New: shellkit.NewCapability}); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := runtime.New(runtime.Config{
@@ -182,9 +182,9 @@ func newTransport() *httpx.Client {
 
 type noAudit struct{}
 
-func (noAudit) Record(context.Context, capkit.AuditEvent) {}
+func (noAudit) Record(context.Context, core.AuditEvent) {}
 
-func callTool(t *testing.T, rt *runtime.Runtime, tool string, input map[string]any) capkit.Result {
+func callTool(t *testing.T, rt *runtime.Runtime, tool string, input map[string]any) core.Result {
 	t.Helper()
 	var raw json.RawMessage
 	if input != nil {
@@ -194,7 +194,7 @@ func callTool(t *testing.T, rt *runtime.Runtime, tool string, input map[string]a
 		}
 		raw = b
 	}
-	res, err := rt.Call(context.Background(), tool, raw, capkit.CallContext{ProjectID: 1, Actor: "test"})
+	res, err := rt.Call(context.Background(), tool, raw, core.CallContext{ProjectID: 1, Actor: "test"})
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -214,7 +214,7 @@ func TestWebShellSessionRoundTrip(t *testing.T) {
 			"shell_type": "php", "cmd_param": "cmd", "protocol": "plain",
 		},
 	})
-	if opened.Status != capkit.StatusSuccess {
+	if opened.Status != core.StatusSuccess {
 		t.Fatalf("session_open failed: %s / %s", opened.Summary, errText(opened))
 	}
 	var openData struct {
@@ -232,7 +232,7 @@ func TestWebShellSessionRoundTrip(t *testing.T) {
 	ran := callTool(t, rt, "session_exec", map[string]any{
 		"session_id": openData.SessionID, "command": "echo hello-from-webshell",
 	})
-	if ran.Status != capkit.StatusSuccess {
+	if ran.Status != core.StatusSuccess {
 		t.Fatalf("session_exec failed: %s / %s", ran.Summary, errText(ran))
 	}
 	var execData struct {
@@ -245,13 +245,13 @@ func TestWebShellSessionRoundTrip(t *testing.T) {
 		t.Fatalf("stdout = %q (expected the command's real output)", execData.Stdout)
 	}
 
-	// 3. Upload: the WebShell must satisfy capkit.Uploader (docs §5.1 optional
+	// 3. Upload: the WebShell must satisfy core.Uploader (docs §5.1 optional
 	// capability) and the bytes must land on the target.
 	uploaded := callTool(t, rt, "session_upload", map[string]any{
 		"session_id": openData.SessionID, "remote": "/tmp/capkit-webshell-test",
 		"content": "payloadbytes", // 12 base64-shaped chars: a sniffer would decode these to garbage
 	})
-	if uploaded.Status != capkit.StatusSuccess {
+	if uploaded.Status != core.StatusSuccess {
 		t.Fatalf("session_upload failed: %s / %s", uploaded.Summary, errText(uploaded))
 	}
 	shell.mu.Lock()
@@ -265,7 +265,7 @@ func TestWebShellSessionRoundTrip(t *testing.T) {
 	downloaded := callTool(t, rt, "session_download", map[string]any{
 		"session_id": openData.SessionID, "remote": "/tmp/capkit-webshell-test",
 	})
-	if downloaded.Status != capkit.StatusSuccess {
+	if downloaded.Status != core.StatusSuccess {
 		t.Fatalf("session_download failed: %s / %s", downloaded.Summary, errText(downloaded))
 	}
 	var dlData struct {
@@ -280,11 +280,11 @@ func TestWebShellSessionRoundTrip(t *testing.T) {
 
 	// 5. Close, and the idempotent close the contract promises.
 	closed := callTool(t, rt, "session_close", map[string]any{"session_id": openData.SessionID})
-	if closed.Status != capkit.StatusSuccess {
+	if closed.Status != core.StatusSuccess {
 		t.Fatalf("session_close failed: %s", closed.Summary)
 	}
 	again := callTool(t, rt, "session_close", map[string]any{"session_id": openData.SessionID})
-	if again.Status != capkit.StatusSuccess {
+	if again.Status != core.StatusSuccess {
 		t.Fatalf("closing twice must stay successful: %s", again.Summary)
 	}
 
@@ -299,7 +299,7 @@ func TestWebShellSessionListSeesTheOpenedSession(t *testing.T) {
 	opened := callTool(t, rt, "session_open", map[string]any{
 		"kind": "webshell", "host": shell.server.URL + "/w.php", "secret": shell.pass,
 	})
-	if opened.Status != capkit.StatusSuccess {
+	if opened.Status != core.StatusSuccess {
 		t.Fatalf("open: %s", opened.Summary)
 	}
 	listed := callTool(t, rt, "session_list", nil)
@@ -335,7 +335,7 @@ func TestWebShellOpenUnregisteredKind(t *testing.T) {
 	shell := newWebShellServer(t)
 	rt := webshellRuntime(t, shell.server.URL)
 	res := callTool(t, rt, "session_open", map[string]any{"kind": "ssh", "host": "127.0.0.1"})
-	if res.Error == nil || res.Error.Code != capkit.CodeTargetUnreachable {
+	if res.Error == nil || res.Error.Code != core.CodeTargetUnreachable {
 		t.Fatalf("an unregistered kind must surface as unreachable: %+v", res.Error)
 	}
 	if !strings.Contains(res.Error.Message, "没有注册 ssh") {
@@ -343,7 +343,7 @@ func TestWebShellOpenUnregisteredKind(t *testing.T) {
 	}
 }
 
-func errText(res capkit.Result) string {
+func errText(res core.Result) string {
 	if res.Error == nil {
 		return ""
 	}

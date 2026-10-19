@@ -8,18 +8,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/sealer"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/harness/fakenuclei"
 	"github.com/c1ayooo/capkit/runtime"
 )
 
-func newRuntime(t *testing.T, reg *capkit.Registry) (*runtime.Runtime, *auditlog.Memory) {
+func newRuntime(t *testing.T, reg *core.Registry) (*runtime.Runtime, *auditlog.Memory) {
 	t.Helper()
 	scope := gates.StaticScope("127.0.0.1")
 	lim := gates.NewLimiter()
@@ -45,7 +45,7 @@ func TestHTTPProbeThroughRuntime(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestHTTPProbeThroughRuntime(t *testing.T) {
 		t.Fatalf("tools = %d", len(rt.Tools()))
 	}
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 7, Actor: "tester"})
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 7, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +93,13 @@ func TestMetaRequestsCountsOutboundCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": srv.URL})
-	res, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 1, Actor: "tester"})
+	res, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 1, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,35 +109,35 @@ func TestMetaRequestsCountsOutboundCalls(t *testing.T) {
 }
 
 func TestScopeDenied(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
 	input, _ := json.Marshal(map[string]any{"url": "http://example.com/"})
-	_, err := rt.Call(context.Background(), "http_probe", input, capkit.CallContext{ProjectID: 1})
+	_, err := rt.Call(context.Background(), "http_probe", input, core.CallContext{ProjectID: 1})
 	if err == nil {
 		t.Fatal("expected scope denial")
 	}
-	if !strings.Contains(err.Error(), capkit.CodeScopeDenied) {
+	if !strings.Contains(err.Error(), core.CodeScopeDenied) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestUnknownTool(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}
 	rt, _ := newRuntime(t, reg)
-	_, err := rt.Call(context.Background(), "nope", json.RawMessage(`{}`), capkit.CallContext{})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeNotFound) {
+	_, err := rt.Call(context.Background(), "nope", json.RawMessage(`{}`), core.CallContext{})
+	if err == nil || !strings.Contains(err.Error(), core.CodeNotFound) {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestHighRiskRequiresApproval(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterNuclei(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestHighRiskRequiresApproval(t *testing.T) {
 }
 
 func TestRegistryRejectsDuplicateCapability(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterHTTP(reg); err != nil {
 		t.Fatal(err)
 	}

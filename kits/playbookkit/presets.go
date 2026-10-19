@@ -9,7 +9,7 @@ import (
 //go:embed presets/*.yaml
 var presetFS embed.FS
 
-// EmbeddedPresets returns the playbooks compiled into capkit. Hosts can expose
+// EmbeddedPresets returns the playbooks compiled into core. Hosts can expose
 // these without shipping a config directory next to the binary.
 func EmbeddedPresets() (map[string]*Playbook, []error) {
 	out := map[string]*Playbook{}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type SearchItem struct {
@@ -37,9 +37,9 @@ type SearchResult struct {
 
 // Client runs GitHub Code Search through the external Fetcher port.
 type Client struct {
-	Fetcher  capkit.Fetcher
-	Settings capkit.Settings
-	Limiter  capkit.Limiter
+	Fetcher  core.Fetcher
+	Settings core.Settings
+	Limiter  core.Limiter
 	BaseURL  string
 	ProxyURL string
 }
@@ -49,14 +49,14 @@ const searchResultCap = 1000
 func (c *Client) Search(ctx context.Context, query string, page, perPage int) (*SearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, capkit.InvalidInput("query is required")
+		return nil, core.InvalidInput("query is required")
 	}
 	if c.Fetcher == nil {
-		return nil, capkit.Unavailable("github fetcher is not configured")
+		return nil, core.Unavailable("github fetcher is not configured")
 	}
 	token := c.token(ctx)
 	if token == "" {
-		return nil, capkit.Unavailable("GitHub token is not configured (settings: github.token)")
+		return nil, core.Unavailable("GitHub token is not configured (settings: github.token)")
 	}
 	if page <= 0 {
 		page = 1
@@ -75,7 +75,7 @@ func (c *Client) Search(ctx context.Context, query string, page, perPage int) (*
 		base, url.QueryEscape(query), page, perPage)
 
 	if c.Limiter != nil {
-		release, err := c.Limiter.Acquire(ctx, "api.github.com", capkit.RateLimitSpec{
+		release, err := c.Limiter.Acquire(ctx, "api.github.com", core.RateLimitSpec{
 			PerSecond: 0.15, Burst: 2, Concurrency: 1,
 		})
 		if err != nil {
@@ -83,7 +83,7 @@ func (c *Client) Search(ctx context.Context, query string, page, perPage int) (*
 		}
 		defer release()
 	}
-	res, err := c.Fetcher.Fetch(ctx, capkit.Request{
+	res, err := c.Fetcher.Fetch(ctx, core.Request{
 		Method: "GET", URL: endpoint, Timeout: 25 * time.Second, Proxy: c.ProxyURL,
 		Headers: map[string]string{
 			"Accept":               "application/vnd.github.text-match+json",
@@ -99,17 +99,17 @@ func (c *Client) Search(ctx context.Context, query string, page, perPage int) (*
 	case 200:
 		// ok
 	case 401, 403:
-		return nil, capkit.NewError(capkit.CodeUnavailable,
+		return nil, core.NewError(core.CodeUnavailable,
 			fmt.Sprintf("GitHub API rejected the request (%d): %s", res.Status, ghMessage(res.Body)))
 	case 422:
-		return nil, capkit.InvalidInput("GitHub rejected the query: " + ghMessage(res.Body))
+		return nil, core.InvalidInput("GitHub rejected the query: " + ghMessage(res.Body))
 	default:
-		return nil, capkit.NewError(capkit.CodeUnavailable,
+		return nil, core.NewError(core.CodeUnavailable,
 			fmt.Sprintf("GitHub API %d: %s", res.Status, ghMessage(res.Body)))
 	}
 	var raw githubCodeResponse
 	if err := json.Unmarshal(res.Body, &raw); err != nil {
-		return nil, capkit.NewError(capkit.CodeInternal, "parse GitHub response: "+err.Error())
+		return nil, core.NewError(core.CodeInternal, "parse GitHub response: "+err.Error())
 	}
 	out := &SearchResult{
 		TotalCount: raw.TotalCount, Incomplete: raw.IncompleteResults,

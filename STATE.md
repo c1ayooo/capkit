@@ -138,7 +138,7 @@ session_close: success | 会话已关闭: sess-1792392827454760951-1
    「契约包，无工具」冲突。ROADMAP M2 任务 1 明确要求「identitykit 注册成工具」，
    以 ROADMAP 为准，README 与 `docs/STATUS.md` 已同步改写。
 2. **identitykit 不进 RegisterFull**：它的 flow registry 是宿主注入的协作者
-   （同 enterprisekit 的 resolver），`capkit.Deps` 装不下，因此由
+   （同 enterprisekit 的 resolver），`core.Deps` 装不下，因此由
    `all.RegisterIdentity(reg, flows)` 单独注册，contract_ci_test 的
    `argKitRegistration` 里带参登记（契约覆盖含它的 3 个工具）。
 3. **收紧 WebShell 宿主 Executor 契约（修复静默数据损坏）**：

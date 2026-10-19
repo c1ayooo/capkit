@@ -6,18 +6,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // fakeSession answers each EscapeCheck with a canned verdict line. It embeds the
 // exact `"ok <id>"` / `"no <id>"` string its command would print, so matching is
 // unambiguous.
 type fakeSession struct {
-	info     capkit.SessionInfo
+	info     core.SessionInfo
 	verdicts map[string]string
 }
 
-func newFakeSession(info capkit.SessionInfo, hits ...string) *fakeSession {
+func newFakeSession(info core.SessionInfo, hits ...string) *fakeSession {
 	hit := map[string]bool{}
 	for _, h := range hits {
 		hit[h] = true
@@ -33,39 +33,39 @@ func newFakeSession(info capkit.SessionInfo, hits ...string) *fakeSession {
 	return &fakeSession{info: info, verdicts: verdicts}
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	for id, line := range f.verdicts {
 		if strings.Contains(cmd, `"ok `+id+`"`) || strings.Contains(cmd, `"no `+id+`"`) {
-			return capkit.Output{Command: cmd, Stdout: line + "\n", ExitCode: 0}, nil
+			return core.Output{Command: cmd, Stdout: line + "\n", ExitCode: 0}, nil
 		}
 	}
-	return capkit.Output{Command: cmd}, nil
+	return core.Output{Command: cmd}, nil
 }
 
-func (f *fakeSession) Info() capkit.SessionInfo { return f.info }
-func (f *fakeSession) Close() error             { return nil }
+func (f *fakeSession) Info() core.SessionInfo { return f.info }
+func (f *fakeSession) Close() error           { return nil }
 
-// fakeManager is a minimal capkit.SessionManager for hermetic tests.
+// fakeManager is a minimal core.SessionManager for hermetic tests.
 type fakeManager struct {
-	sessions map[string]capkit.Session
-	infos    []capkit.SessionInfo
+	sessions map[string]core.Session
+	infos    []core.SessionInfo
 }
 
-func newFakeManager() *fakeManager { return &fakeManager{sessions: map[string]capkit.Session{}} }
+func newFakeManager() *fakeManager { return &fakeManager{sessions: map[string]core.Session{}} }
 
-func (m *fakeManager) add(id string, s capkit.Session) {
+func (m *fakeManager) add(id string, s core.Session) {
 	m.sessions[id] = s
 	m.infos = append(m.infos, s.Info())
 }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, nil
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, nil
 }
-func (m *fakeManager) Get(id string) (capkit.Session, bool) { s, ok := m.sessions[id]; return s, ok }
-func (m *fakeManager) List() []capkit.SessionInfo           { return m.infos }
-func (m *fakeManager) Close(string) error                   { return nil }
+func (m *fakeManager) Get(id string) (core.Session, bool) { s, ok := m.sessions[id]; return s, ok }
+func (m *fakeManager) List() []core.SessionInfo           { return m.infos }
+func (m *fakeManager) Close(string) error                 { return nil }
 
-func escapeSurfaceFromResult(t *testing.T, res capkit.Result) EscapeSurface {
+func escapeSurfaceFromResult(t *testing.T, res core.Result) EscapeSurface {
 	t.Helper()
 	var s EscapeSurface
 	if err := json.Unmarshal(res.Data, &s); err != nil {
@@ -77,13 +77,13 @@ func escapeSurfaceFromResult(t *testing.T, res capkit.Result) EscapeSurface {
 func TestEscapeCheckHits(t *testing.T) {
 	mgr := newFakeManager()
 	mgr.add("s1", newFakeSession(
-		capkit.SessionInfo{ID: "s1", Kind: "ssh", Host: "10.0.0.9", OS: "linux"},
+		core.SessionInfo{ID: "s1", Kind: "ssh", Host: "10.0.0.9", OS: "linux"},
 		"docker_sock", "privileged", "cap_sys_admin", "core_pattern_writable", "host_pid_namespace",
 	))
 
-	c := newCap(t, capkit.Deps{Sessions: mgr})
+	c := newCap(t, core.Deps{Sessions: mgr})
 	res := doCall(t, c, "container_escape_check", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status = %q (%s)", res.Status, res.Summary)
 	}
 	s := escapeSurfaceFromResult(t, res)
@@ -112,9 +112,9 @@ func TestEscapeCheckHits(t *testing.T) {
 
 func TestEscapeCheckClean(t *testing.T) {
 	mgr := newFakeManager()
-	mgr.add("s1", newFakeSession(capkit.SessionInfo{ID: "s1", Kind: "ssh", Host: "h"}))
+	mgr.add("s1", newFakeSession(core.SessionInfo{ID: "s1", Kind: "ssh", Host: "h"}))
 
-	c := newCap(t, capkit.Deps{Sessions: mgr})
+	c := newCap(t, core.Deps{Sessions: mgr})
 	res := doCall(t, c, "container_escape_check", map[string]any{"session_id": "s1"})
 	s := escapeSurfaceFromResult(t, res)
 	if s.HitCount() != 0 {
@@ -129,28 +129,28 @@ func TestEscapeCheckClean(t *testing.T) {
 }
 
 func TestEscapeCheckSessionNotFound(t *testing.T) {
-	c := newCap(t, capkit.Deps{Sessions: newFakeManager()})
+	c := newCap(t, core.Deps{Sessions: newFakeManager()})
 	res := doCall(t, c, "container_escape_check", map[string]any{"session_id": "nope"})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
 func TestEscapeCheckNoManager(t *testing.T) {
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "container_escape_check", map[string]any{"session_id": "s1"})
-	if res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("res = %+v", res)
 	}
-	if res.Status != capkit.StatusUnavailable {
+	if res.Status != core.StatusUnavailable {
 		t.Fatalf("status = %q", res.Status)
 	}
 }
 
 func TestEscapeCheckMissingSessionID(t *testing.T) {
-	c := newCap(t, capkit.Deps{Sessions: newFakeManager()})
+	c := newCap(t, core.Deps{Sessions: newFakeManager()})
 	res := doCall(t, c, "container_escape_check", map[string]any{})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("res = %+v", res)
 	}
 }
@@ -160,7 +160,7 @@ func TestEscapePlanFromSurface(t *testing.T) {
 		Host: "10.0.0.9", DockerSock: true, Privileged: true,
 		CapSysAdmin: true, CapDacReadSearch: true,
 	}
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "container_escape_plan", map[string]any{"surface": surface})
 	data := decodeData(t, res)
 	techniques, _ := data["techniques"].([]any)
@@ -177,14 +177,14 @@ func TestEscapePlanFromSurface(t *testing.T) {
 		if step.Reason == "" {
 			t.Fatalf("technique without reason: %+v", step)
 		}
-		if !step.Risk.AtLeast(capkit.RiskMedium) {
+		if !step.Risk.AtLeast(core.RiskMedium) {
 			t.Fatalf("technique risk too low: %+v", step)
 		}
 	}
 }
 
 func TestEscapePlanDacReadSearchOnly(t *testing.T) {
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "container_escape_plan", map[string]any{
 		"surface": EscapeSurface{CapDacReadSearch: true},
 	})
@@ -201,8 +201,8 @@ func TestEscapePlanDacReadSearchOnly(t *testing.T) {
 
 func TestEscapePlanFromSession(t *testing.T) {
 	mgr := newFakeManager()
-	mgr.add("s1", newFakeSession(capkit.SessionInfo{ID: "s1", Host: "h"}, "privileged"))
-	c := newCap(t, capkit.Deps{Sessions: mgr})
+	mgr.add("s1", newFakeSession(core.SessionInfo{ID: "s1", Host: "h"}, "privileged"))
+	c := newCap(t, core.Deps{Sessions: mgr})
 	res := doCall(t, c, "container_escape_plan", map[string]any{"session_id": "s1"})
 	if len(res.Next) == 0 {
 		t.Fatal("privileged surface must yield techniques")
@@ -220,23 +220,23 @@ func TestEscapePlanFromSession(t *testing.T) {
 }
 
 func TestEscapePlanSessionNotFound(t *testing.T) {
-	c := newCap(t, capkit.Deps{Sessions: newFakeManager()})
+	c := newCap(t, core.Deps{Sessions: newFakeManager()})
 	res := doCall(t, c, "container_escape_plan", map[string]any{"session_id": "nope"})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
 func TestEscapePlanInvalidInput(t *testing.T) {
-	c := newCap(t, capkit.Deps{Sessions: newFakeManager()})
+	c := newCap(t, core.Deps{Sessions: newFakeManager()})
 	res := doCall(t, c, "container_escape_plan", map[string]any{})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
 func TestEscapePlanEmptySurface(t *testing.T) {
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "container_escape_plan", map[string]any{"surface": EscapeSurface{}})
 	if len(res.Next) != 0 {
 		t.Fatalf("empty surface must yield no techniques: %+v", res.Next)
@@ -247,7 +247,7 @@ func TestEscapePlanEmptySurface(t *testing.T) {
 }
 
 func TestEscapePlanCgroupWhenPrivileged(t *testing.T) {
-	c := newCap(t, capkit.Deps{})
+	c := newCap(t, core.Deps{})
 	res := doCall(t, c, "container_escape_plan", map[string]any{
 		"surface": EscapeSurface{Privileged: true},
 	})

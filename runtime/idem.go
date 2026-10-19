@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // idemCache reuses the result of a repeated call within a time window. Agents
@@ -21,7 +21,7 @@ type idemCache struct {
 
 type idemEntry struct {
 	expires time.Time
-	res     capkit.Result
+	res     core.Result
 }
 
 func newIdemCache(window time.Duration, now func() time.Time) *idemCache {
@@ -39,7 +39,7 @@ func newIdemCache(window time.Duration, now func() time.Time) *idemCache {
 // reuse a different request's result. The tool name is part of the key: two
 // different tools that happen to receive byte-identical input (a session_id is
 // enough) must never share a cache entry.
-func idempotencyKey(tool string, cc capkit.CallContext, input []byte) string {
+func idempotencyKey(tool string, cc core.CallContext, input []byte) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte("tool:"))
 	_, _ = h.Write([]byte(tool))
@@ -80,24 +80,24 @@ func writeInt[T int64 | int](h interface{ Write([]byte) (int, error) }, v T) {
 	_, _ = h.Write(buf[i:])
 }
 
-func (c *idemCache) get(key string) (capkit.Result, bool) {
+func (c *idemCache) get(key string) (core.Result, bool) {
 	if c == nil {
-		return capkit.Result{}, false
+		return core.Result{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
 	if !ok {
-		return capkit.Result{}, false
+		return core.Result{}, false
 	}
 	if c.now().After(e.expires) {
 		delete(c.entries, key)
-		return capkit.Result{}, false
+		return core.Result{}, false
 	}
 	return e.res, true
 }
 
-func (c *idemCache) put(key string, res capkit.Result) {
+func (c *idemCache) put(key string, res core.Result) {
 	if c == nil {
 		return
 	}

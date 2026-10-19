@@ -12,7 +12,7 @@ import (
 	"github.com/alibabacloud-go/tea/tea"
 	oss "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 )
 
@@ -513,26 +513,26 @@ func TestAliyunUnavailableWithoutDoer(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unavailable error, got nil")
 	}
-	var ce *capkit.Error
+	var ce *core.Error
 	if !errors.As(err, &ce) {
-		t.Fatalf("want *capkit.Error, got %T (%v)", err, err)
+		t.Fatalf("want *core.Error, got %T (%v)", err, err)
 	}
-	if ce.Code != capkit.CodeUnavailable {
-		t.Fatalf("code = %q, want %q", ce.Code, capkit.CodeUnavailable)
+	if ce.Code != core.CodeUnavailable {
+		t.Fatalf("code = %q, want %q", ce.Code, core.CodeUnavailable)
 	}
 }
 
 // A host gate error (scope denial) must survive classification verbatim, so
 // cloudkit.go's failure() keeps the host's code.
 func TestAliyunCapkitErrorPassthrough(t *testing.T) {
-	denied := capkit.ScopeDenied("out of scope: ecs.cn-hangzhou.aliyuncs.com")
+	denied := core.ScopeDenied("out of scope: ecs.cn-hangzhou.aliyuncs.com")
 	got := aliyunError(denied)
-	var ce *capkit.Error
+	var ce *core.Error
 	if !errors.As(got, &ce) {
-		t.Fatalf("want *capkit.Error passthrough, got %T", got)
+		t.Fatalf("want *core.Error passthrough, got %T", got)
 	}
-	if ce.Code != capkit.CodeScopeDenied {
-		t.Fatalf("code = %q, want %q", ce.Code, capkit.CodeScopeDenied)
+	if ce.Code != core.CodeScopeDenied {
+		t.Fatalf("code = %q, want %q", ce.Code, core.CodeScopeDenied)
 	}
 }
 

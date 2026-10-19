@@ -11,7 +11,7 @@
   `AddCookie` 注入、`Headers` 输出
 - `TokenIdentity`：bearer/token 形态的身份，可带 `Refresh` 回调，`Headers`
   在需要时按 token 快照刷新
-- `FormFlow`：表单登录流程的 `capkit.AuthFlow` 实现
+- `FormFlow`：表单登录流程的 `core.AuthFlow` 实现
 - `ExtractCSRF` / `ExtractCSRFNamed` / `ExtractCSRFWithSource`：从 HTML hidden
   input / meta 标签抽 CSRF token，`CSRFNames` 是默认识别的 token 名集合
 

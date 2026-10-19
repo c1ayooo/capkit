@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // DefaultTime is the clock origin every fixture uses, so signature and
@@ -34,7 +34,7 @@ type Route struct {
 	Err     error
 }
 
-// HTTP is a scripted capkit.HTTPDoer and capkit.Fetcher. It answers from a
+// HTTP is a scripted core.HTTPDoer and core.Fetcher. It answers from a
 // route table, falling back to the default response, and records every request
 // in call order.
 type HTTP struct {
@@ -52,7 +52,7 @@ type HTTP struct {
 	Err error
 
 	mu       sync.Mutex
-	requests []capkit.Request
+	requests []core.Request
 }
 
 // NewHTTP builds a fake transport answering every request with status/body.
@@ -63,15 +63,15 @@ func NewHTTP(status int, body string) *HTTP {
 // NewHTTPJSON answers every request with a JSON body.
 func NewHTTPJSON(body string) *HTTP { return NewHTTP(200, body) }
 
-func (h *HTTP) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (h *HTTP) Do(ctx context.Context, req core.Request) (*core.Response, error) {
 	return h.respond(ctx, req)
 }
 
-func (h *HTTP) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (h *HTTP) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
 	return h.respond(ctx, req)
 }
 
-func (h *HTTP) respond(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (h *HTTP) respond(_ context.Context, req core.Request) (*core.Response, error) {
 	h.mu.Lock()
 	h.requests = append(h.requests, req)
 	var route Route
@@ -100,7 +100,7 @@ func (h *HTTP) respond(_ context.Context, req capkit.Request) (*capkit.Response,
 	if status == 0 {
 		status = 200
 	}
-	return &capkit.Response{
+	return &core.Response{
 		Status:   status,
 		Body:     []byte(route.Body),
 		Headers:  route.Headers,
@@ -110,10 +110,10 @@ func (h *HTTP) respond(_ context.Context, req capkit.Request) (*capkit.Response,
 }
 
 // Requests returns a copy of every request the fake received.
-func (h *HTTP) Requests() []capkit.Request {
+func (h *HTTP) Requests() []core.Request {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]capkit.Request(nil), h.requests...)
+	return append([]core.Request(nil), h.requests...)
 }
 
 // Calls is the number of requests the fake received.
@@ -124,18 +124,18 @@ func (h *HTTP) Calls() int {
 }
 
 // Last returns the most recent request.
-func (h *HTTP) Last() (capkit.Request, bool) {
+func (h *HTTP) Last() (core.Request, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.requests) == 0 {
-		return capkit.Request{}, false
+		return core.Request{}, false
 	}
 	return h.requests[len(h.requests)-1], true
 }
 
 // ───────────────────────────── process ─────────────────────────────
 
-// Process is a scripted capkit.ProcessRunner: every Run returns the preset
+// Process is a scripted core.ProcessRunner: every Run returns the preset
 // stdout/stderr/exit code and records the spec.
 type Process struct {
 	Stdout   []byte
@@ -143,13 +143,13 @@ type Process struct {
 	ExitCode int
 	Err      error
 	// Handler, when set, overrides the preset and answers per spec.
-	Handler func(capkit.ProcessSpec) (*capkit.ProcessResult, error)
+	Handler func(core.ProcessSpec) (*core.ProcessResult, error)
 
 	mu    sync.Mutex
-	calls []capkit.ProcessSpec
+	calls []core.ProcessSpec
 }
 
-func (p *Process) Run(_ context.Context, spec capkit.ProcessSpec) (*capkit.ProcessResult, error) {
+func (p *Process) Run(_ context.Context, spec core.ProcessSpec) (*core.ProcessResult, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, spec)
 	handler := p.Handler
@@ -160,7 +160,7 @@ func (p *Process) Run(_ context.Context, spec capkit.ProcessSpec) (*capkit.Proce
 	if p.Err != nil {
 		return nil, p.Err
 	}
-	return &capkit.ProcessResult{
+	return &core.ProcessResult{
 		ExitCode: p.ExitCode,
 		Stdout:   append([]byte(nil), p.Stdout...),
 		Stderr:   append([]byte(nil), p.Stderr...),
@@ -168,18 +168,18 @@ func (p *Process) Run(_ context.Context, spec capkit.ProcessSpec) (*capkit.Proce
 }
 
 // Calls returns a copy of every process spec the fake received.
-func (p *Process) Calls() []capkit.ProcessSpec {
+func (p *Process) Calls() []core.ProcessSpec {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]capkit.ProcessSpec(nil), p.calls...)
+	return append([]core.ProcessSpec(nil), p.calls...)
 }
 
 // Last returns the most recent process spec.
-func (p *Process) Last() (capkit.ProcessSpec, bool) {
+func (p *Process) Last() (core.ProcessSpec, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.calls) == 0 {
-		return capkit.ProcessSpec{}, false
+		return core.ProcessSpec{}, false
 	}
 	return p.calls[len(p.calls)-1], true
 }
@@ -224,7 +224,7 @@ func (c *Clock) Set(t time.Time) {
 	c.Now_ = t
 }
 
-// IDs is a deterministic capkit.IDGenerator: the n-th call for a prefix returns
+// IDs is a deterministic core.IDGenerator: the n-th call for a prefix returns
 // "<prefix>-<n>".
 type IDs struct {
 	mu sync.Mutex
@@ -244,55 +244,55 @@ func (g *IDs) New(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, g.n[prefix])
 }
 
-// Audit records every capkit.AuditEvent it receives.
+// Audit records every core.AuditEvent it receives.
 type Audit struct {
 	mu     sync.Mutex
-	events []capkit.AuditEvent
+	events []core.AuditEvent
 }
 
-func (a *Audit) Record(_ context.Context, ev capkit.AuditEvent) {
+func (a *Audit) Record(_ context.Context, ev core.AuditEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.events = append(a.events, ev)
 }
 
 // Events returns a copy of the recorded events.
-func (a *Audit) Events() []capkit.AuditEvent {
+func (a *Audit) Events() []core.AuditEvent {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]capkit.AuditEvent(nil), a.events...)
+	return append([]core.AuditEvent(nil), a.events...)
 }
 
 // ───────────────────────────── policy ports ─────────────────────────────
 
-// Scope is a permissive-by-default capkit.ScopeChecker. Denied lists the hosts
+// Scope is a permissive-by-default core.ScopeChecker. Denied lists the hosts
 // that must be refused; Err denies everything.
 type Scope struct {
 	Denied  []string
 	Err     error
-	Checked []capkit.Target
+	Checked []core.Target
 }
 
-func (s *Scope) Check(_ context.Context, t capkit.Target) error {
+func (s *Scope) Check(_ context.Context, t core.Target) error {
 	s.Checked = append(s.Checked, t)
 	if s.Err != nil {
 		return s.Err
 	}
 	for _, d := range s.Denied {
 		if strings.Contains(t.Key(), d) {
-			return capkit.ScopeDenied("out of scope: " + t.Key())
+			return core.ScopeDenied("out of scope: " + t.Key())
 		}
 	}
 	return nil
 }
 
-// Approval is an approving-by-default capkit.Approver.
+// Approval is an approving-by-default core.Approver.
 type Approval struct {
 	Err      error
-	Requests []capkit.ApprovalRequest
+	Requests []core.ApprovalRequest
 }
 
-func (a *Approval) Require(_ context.Context, req capkit.ApprovalRequest) error {
+func (a *Approval) Require(_ context.Context, req core.ApprovalRequest) error {
 	a.Requests = append(a.Requests, req)
 	if a.Err != nil {
 		return a.Err
@@ -300,13 +300,13 @@ func (a *Approval) Require(_ context.Context, req capkit.ApprovalRequest) error 
 	return nil
 }
 
-// Limiter is a non-blocking capkit.Limiter that records the keys it admitted.
+// Limiter is a non-blocking core.Limiter that records the keys it admitted.
 type Limiter struct {
 	Err      error
 	Acquired []string
 }
 
-func (l *Limiter) Acquire(_ context.Context, key string, _ capkit.RateLimitSpec) (func(), error) {
+func (l *Limiter) Acquire(_ context.Context, key string, _ core.RateLimitSpec) (func(), error) {
 	if l.Err != nil {
 		return nil, l.Err
 	}
@@ -314,16 +314,16 @@ func (l *Limiter) Acquire(_ context.Context, key string, _ capkit.RateLimitSpec)
 	return func() {}, nil
 }
 
-// Evidence stores every capkit.Evidence it is handed and returns "<Prefix><n>".
+// Evidence stores every core.Evidence it is handed and returns "<Prefix><n>".
 type Evidence struct {
 	Prefix string
 	Err    error
 
 	mu      sync.Mutex
-	records []capkit.Evidence
+	records []core.Evidence
 }
 
-func (e *Evidence) Record(_ context.Context, ev capkit.Evidence) (string, error) {
+func (e *Evidence) Record(_ context.Context, ev core.Evidence) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.Err != nil {
@@ -338,13 +338,13 @@ func (e *Evidence) Record(_ context.Context, ev capkit.Evidence) (string, error)
 }
 
 // Records returns a copy of the stored evidence.
-func (e *Evidence) Records() []capkit.Evidence {
+func (e *Evidence) Records() []core.Evidence {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return append([]capkit.Evidence(nil), e.records...)
+	return append([]core.Evidence(nil), e.records...)
 }
 
-// Settings is an in-memory capkit.Settings.
+// Settings is an in-memory core.Settings.
 type Settings struct {
 	Strings map[string]string
 	Bools   map[string]bool
@@ -412,7 +412,7 @@ func (l *Logger) Lines() []string {
 	return append([]string(nil), l.lines...)
 }
 
-// Artifacts is an in-memory capkit.ArtifactStore.
+// Artifacts is an in-memory core.ArtifactStore.
 type Artifacts struct {
 	mu    sync.Mutex
 	files map[string][]byte
@@ -434,7 +434,7 @@ func (a *Artifacts) Get(_ context.Context, path string) ([]byte, error) {
 	defer a.mu.Unlock()
 	data, ok := a.files[path]
 	if !ok {
-		return nil, capkit.NotFound("artifact not found: " + path)
+		return nil, core.NotFound("artifact not found: " + path)
 	}
 	return append([]byte(nil), data...), nil
 }
@@ -446,79 +446,79 @@ func (a *Artifacts) Delete(_ context.Context, path string) error {
 	return nil
 }
 
-// Binaries is a scripted capkit.BinaryManager reporting every binary installed.
+// Binaries is a scripted core.BinaryManager reporting every binary installed.
 type Binaries struct {
 	Path  string
-	State capkit.BinaryStatus
+	State core.BinaryStatus
 	Err   error
 }
 
-func (b *Binaries) status() capkit.BinaryStatus {
+func (b *Binaries) status() core.BinaryStatus {
 	if b.State.Version == "" {
-		return capkit.BinaryStatus{Installed: true, Version: "test-1.0", Path: b.Path, UpdatedAt: DefaultTime}
+		return core.BinaryStatus{Installed: true, Version: "test-1.0", Path: b.Path, UpdatedAt: DefaultTime}
 	}
 	return b.State
 }
 
-func (b *Binaries) Ensure(context.Context, string, string) (string, capkit.BinaryStatus, error) {
+func (b *Binaries) Ensure(context.Context, string, string) (string, core.BinaryStatus, error) {
 	if b.Err != nil {
-		return "", capkit.BinaryStatus{}, b.Err
+		return "", core.BinaryStatus{}, b.Err
 	}
 	return b.Path, b.status(), nil
 }
 
-func (b *Binaries) Update(context.Context, string, string) (capkit.BinaryStatus, error) {
+func (b *Binaries) Update(context.Context, string, string) (core.BinaryStatus, error) {
 	if b.Err != nil {
-		return capkit.BinaryStatus{}, b.Err
+		return core.BinaryStatus{}, b.Err
 	}
 	return b.status(), nil
 }
 
-func (b *Binaries) Status(context.Context, string) (capkit.BinaryStatus, error) {
+func (b *Binaries) Status(context.Context, string) (core.BinaryStatus, error) {
 	if b.Err != nil {
-		return capkit.BinaryStatus{}, b.Err
+		return core.BinaryStatus{}, b.Err
 	}
 	return b.status(), nil
 }
 
 // ───────────────────────────── knowledge ports ─────────────────────────────
 
-// Fingerprints is a scripted capkit.FingerprintProvider.
+// Fingerprints is a scripted core.FingerprintProvider.
 type Fingerprints struct {
-	Result []capkit.Fingerprint
+	Result []core.Fingerprint
 	Err    error
 }
 
-func (f *Fingerprints) Fingerprint(context.Context, capkit.Target) ([]capkit.Fingerprint, error) {
+func (f *Fingerprints) Fingerprint(context.Context, core.Target) ([]core.Fingerprint, error) {
 	return f.Result, f.Err
 }
 
-// Templates is an in-memory capkit.TemplateCatalog.
+// Templates is an in-memory core.TemplateCatalog.
 type Templates struct {
-	Refs []capkit.TemplateRef
+	Refs []core.TemplateRef
 	Err  error
 }
 
-func (t *Templates) Search(context.Context, capkit.TemplateQuery) ([]capkit.TemplateRef, error) {
+func (t *Templates) Search(context.Context, core.TemplateQuery) ([]core.TemplateRef, error) {
 	return t.Refs, t.Err
 }
 
-func (t *Templates) Get(_ context.Context, id string) (capkit.TemplateRef, bool, error) {
+func (t *Templates) Get(_ context.Context, id string) (core.TemplateRef, bool, error) {
 	if t.Err != nil {
-		return capkit.TemplateRef{}, false, t.Err
+		return core.TemplateRef{}, false, t.Err
 	}
 	for _, r := range t.Refs {
 		if r.ID == id {
 			return r, true, nil
 		}
 	}
-	return capkit.TemplateRef{}, false, nil
+	return core.TemplateRef{}, false, nil
 }
 
-// Engine is a scripted capkit.TemplateEngine.
+// Engine is a scripted core.TemplateEngine.
 type Engine struct {
 	KindName string
-	Result   capkit.Result
+	Result   core.Result
 	Err      error
 }
 
@@ -529,15 +529,15 @@ func (e *Engine) Kind() string {
 	return e.KindName
 }
 
-func (e *Engine) Execute(context.Context, []capkit.TemplateRef, capkit.Target, map[string]any) (capkit.Result, error) {
+func (e *Engine) Execute(context.Context, []core.TemplateRef, core.Target, map[string]any) (core.Result, error) {
 	return e.Result, e.Err
 }
 
 // ───────────────────────────── sessions ─────────────────────────────
 
-// Session is a scripted capkit.Session: Exec answers with the preset output.
+// Session is a scripted core.Session: Exec answers with the preset output.
 type Session struct {
-	SessionInfo capkit.SessionInfo
+	SessionInfo core.SessionInfo
 	Stdout      string
 	Stderr      string
 	ExitCode    int
@@ -550,22 +550,22 @@ type Session struct {
 // NewSession builds a session for host:22 running as root.
 func NewSession(id string) *Session {
 	return &Session{
-		SessionInfo: capkit.SessionInfo{ID: id, Kind: "ssh", Host: "10.0.0.5", Port: 22, User: "root", OS: "linux"},
+		SessionInfo: core.SessionInfo{ID: id, Kind: "ssh", Host: "10.0.0.5", Port: 22, User: "root", OS: "linux"},
 		Stdout:      "uid=0(root) gid=0(root) groups=0(root)\n",
 	}
 }
 
-func (s *Session) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (s *Session) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, cmd)
 	s.mu.Unlock()
 	if s.Err != nil {
-		return capkit.Output{Command: cmd}, s.Err
+		return core.Output{Command: cmd}, s.Err
 	}
-	return capkit.Output{Command: cmd, Stdout: s.Stdout, Stderr: s.Stderr, ExitCode: s.ExitCode}, nil
+	return core.Output{Command: cmd, Stdout: s.Stdout, Stderr: s.Stderr, ExitCode: s.ExitCode}, nil
 }
 
-func (s *Session) Info() capkit.SessionInfo { return s.SessionInfo }
+func (s *Session) Info() core.SessionInfo { return s.SessionInfo }
 
 func (s *Session) Close() error { return nil }
 
@@ -576,7 +576,7 @@ func (s *Session) Calls() []string {
 	return append([]string(nil), s.calls...)
 }
 
-// Sessions is an in-memory capkit.SessionManager. NewSessions starts empty;
+// Sessions is an in-memory core.SessionManager. NewSessions starts empty;
 // NewSessionsWith pre-registers the given sessions.
 type Sessions struct {
 	mu       sync.Mutex
@@ -608,9 +608,9 @@ func (m *Sessions) Add(s *Session) {
 	m.sessions[s.SessionInfo.ID] = s
 }
 
-func (m *Sessions) Open(_ context.Context, spec capkit.SessionSpec) (capkit.SessionInfo, error) {
+func (m *Sessions) Open(_ context.Context, spec core.SessionSpec) (core.SessionInfo, error) {
 	if m.OpenErr != nil {
-		return capkit.SessionInfo{}, m.OpenErr
+		return core.SessionInfo{}, m.OpenErr
 	}
 	s := NewSession(m.NextID("sess"))
 	s.SessionInfo.Kind = spec.Kind
@@ -628,7 +628,7 @@ func (m *Sessions) NextID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, len(m.sessions)+1)
 }
 
-func (m *Sessions) Get(id string) (capkit.Session, bool) {
+func (m *Sessions) Get(id string) (core.Session, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
@@ -638,10 +638,10 @@ func (m *Sessions) Get(id string) (capkit.Session, bool) {
 	return s, true
 }
 
-func (m *Sessions) List() []capkit.SessionInfo {
+func (m *Sessions) List() []core.SessionInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]capkit.SessionInfo, 0, len(m.order))
+	out := make([]core.SessionInfo, 0, len(m.order))
 	for _, id := range m.order {
 		if s, ok := m.sessions[id]; ok {
 			out = append(out, s.SessionInfo)
@@ -679,14 +679,14 @@ type CloudSigner struct {
 
 // CloudSignRequest is one recorded signing request.
 type CloudSignRequest struct {
-	Request   capkit.Request
+	Request   core.Request
 	AccessKey string
 	SecretKey string
 	At        time.Time
 }
 
 // SignRequest stamps req with a fake Authorization header and records the call.
-func (s *CloudSigner) SignRequest(req capkit.Request, accessKey, secretKey string, now time.Time) (capkit.Request, error) {
+func (s *CloudSigner) SignRequest(req core.Request, accessKey, secretKey string, now time.Time) (core.Request, error) {
 	s.mu.Lock()
 	s.signed = append(s.signed, CloudSignRequest{Request: req, AccessKey: accessKey, SecretKey: secretKey, At: now})
 	s.mu.Unlock()
@@ -758,22 +758,22 @@ func NewPorts() *Ports {
 	}
 }
 
-// Deps projects the fake ports into a capkit.Deps for a kit constructor.
-func (p *Ports) Deps() capkit.Deps {
-	return capkit.Deps{
+// Deps projects the fake ports into a core.Deps for a kit constructor.
+func (p *Ports) Deps() core.Deps {
+	return core.Deps{
 		Scope: p.Scope, Approval: p.Approval, Evidence: p.Evidence,
 		HTTP: p.HTTP, Fetcher: p.Fetcher, Limiter: p.Limiter, Audit: p.Audit,
 		Settings: p.Settings, Sealer: p.Sealer, Logger: p.Logger,
 		Clock: p.Clock, IDs: p.IDs, Processes: p.Process,
 		Artifacts: p.Artifact, Binaries: p.Binaries,
 		Fingerprints: p.Fingerprints, Templates: p.Templates,
-		TemplateEngines: map[string]capkit.TemplateEngine{"http": p.Engine, "nuclei": &Engine{KindName: "nuclei"}},
+		TemplateEngines: map[string]core.TemplateEngine{"http": p.Engine, "nuclei": &Engine{KindName: "nuclei"}},
 		Sessions:        p.Sessions,
 	}
 }
 
-// Deps builds a full capkit.Deps wired with permissive fakes.
-func Deps() capkit.Deps { return NewPorts().Deps() }
+// Deps builds a full core.Deps wired with permissive fakes.
+func Deps() core.Deps { return NewPorts().Deps() }
 
 // MinimalInput derives a smallest legal input for a tool from its JSON schema:
 // every required property is filled with a type-appropriate sample value. It

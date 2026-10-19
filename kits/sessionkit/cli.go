@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // CLIOpener runs commands as a local process through the host's ProcessRunner
@@ -23,7 +23,7 @@ import (
 // that only needs host-side local commands passes adapters/exec.NewLocal().
 type CLIOpener struct {
 	// Runner is required: CLIOpener holds no execution path of its own.
-	Runner capkit.ProcessRunner
+	Runner core.ProcessRunner
 	// AllowedCommands, when non-empty, restricts the first token of every
 	// command. Empty means unrestricted (host's responsibility).
 	AllowedCommands []string
@@ -32,14 +32,14 @@ type CLIOpener struct {
 }
 
 // Open returns a CLI session. spec.Host is ignored; "local" is conventional.
-func (o *CLIOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Session, error) {
+func (o *CLIOpener) Open(_ context.Context, spec core.SessionSpec) (core.Session, error) {
 	if o.Runner == nil {
-		return nil, capkit.Unavailable("cli opener requires a process runner")
+		return nil, core.Unavailable("cli opener requires a process runner")
 	}
-	info := capkit.SessionInfo{
-		Kind: "cli", Host: capkit.FirstNonEmpty(spec.Host, "local"),
+	info := core.SessionInfo{
+		Kind: "cli", Host: core.FirstNonEmpty(spec.Host, "local"),
 		OS: osName(), Arch: runtime.GOARCH, Labels: spec.Labels,
-		Meta: map[string]string{"cwd": capkit.FirstNonEmpty(cwd(), "")},
+		Meta: map[string]string{"cwd": core.FirstNonEmpty(cwd(), "")},
 	}
 	if u := hostUser(); u != "" {
 		info.User = u
@@ -53,25 +53,25 @@ func (o *CLIOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Ses
 
 // CLISession is a local-process Session.
 type CLISession struct {
-	info    capkit.SessionInfo
+	info    core.SessionInfo
 	allowed []string
 	shell   string
-	runner  capkit.ProcessRunner
+	runner  core.ProcessRunner
 }
 
-func (s *CLISession) Info() capkit.SessionInfo { return s.info }
+func (s *CLISession) Info() core.SessionInfo { return s.info }
 
 func (s *CLISession) Close() error { return nil }
 
-func (s *CLISession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts) (capkit.Output, error) {
+func (s *CLISession) Exec(ctx context.Context, cmd string, opts core.ExecOpts) (core.Output, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return capkit.Output{}, fmt.Errorf("命令为空")
+		return core.Output{}, fmt.Errorf("命令为空")
 	}
 	if len(s.allowed) > 0 {
 		first := strings.Fields(cmd)
 		if len(first) == 0 || !containsStr(s.allowed, first[0]) {
-			return capkit.Output{}, fmt.Errorf("命令 %q 不在白名单内", first)
+			return core.Output{}, fmt.Errorf("命令 %q 不在白名单内", first)
 		}
 	}
 	shell := opts.Shell
@@ -85,10 +85,10 @@ func (s *CLISession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts)
 	if opts.TTY {
 		args = []string{"-i", "-c", cmd}
 	}
-	spec := capkit.ProcessSpec{
+	spec := core.ProcessSpec{
 		Path:    shell,
 		Args:    args,
-		Dir:     capkit.FirstNonEmpty(opts.Dir, s.info.Meta["cwd"]),
+		Dir:     core.FirstNonEmpty(opts.Dir, s.info.Meta["cwd"]),
 		Env:     envList(opts.Env),
 		Stdin:   opts.Stdin,
 		Timeout: opts.Timeout,
@@ -97,9 +97,9 @@ func (s *CLISession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts)
 	pr, err := s.runner.Run(ctx, spec)
 	dur := time.Since(started)
 	if err != nil {
-		return capkit.OutputFor(cmd, "", err.Error(), -1, dur, opts.MaxOutput), err
+		return core.OutputFor(cmd, "", err.Error(), -1, dur, opts.MaxOutput), err
 	}
-	return capkit.OutputFor(cmd, string(pr.Stdout), string(pr.Stderr), pr.ExitCode, dur, opts.MaxOutput), nil
+	return core.OutputFor(cmd, string(pr.Stdout), string(pr.Stderr), pr.ExitCode, dur, opts.MaxOutput), nil
 }
 
 // envList renders extra environment entries. The runner owns the base

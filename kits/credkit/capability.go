@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Kit holds the injected ports for credential-use verification.
 type Kit struct {
-	Fetcher capkit.Fetcher
+	Fetcher core.Fetcher
 	// Endpoints optionally overrides vendor STS/IAM endpoints per provider
 	// (e.g. a sovereign-cloud host). Empty values fall back to CloudEndpoints.
 	Endpoints map[string]string
@@ -21,20 +21,20 @@ type Kit struct {
 
 // New builds a credential kit. The host injects a Fetcher so cloud verification
 // still respects proxy/timeout/rate/audit policy.
-func New(fetcher capkit.Fetcher) *Kit { return &Kit{Fetcher: fetcher} }
+func New(fetcher core.Fetcher) *Kit { return &Kit{Fetcher: fetcher} }
 
-// NewCapability is the registry constructor: it satisfies capkit.Spec.New.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+// NewCapability is the registry constructor: it satisfies core.Spec.New.
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return New(deps.Fetcher), nil
 }
 
 // Manifest exposes the credential-use tool surface. These tools verify that a
 // discovered credential works; they do not discover vulnerabilities.
-func (k *Kit) Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func (k *Kit) Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "credkit", Version: "0.1.0", APIVersion: "v1",
 		Requires: []string{"fetcher"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "credential_verify_cloud",
 				Description: "Verify a cloud AK/SK with the provider's minimal-read STS/IAM call (aliyun/tencent/aws/huawei/volc). Returns validity, account identity and read-only permission surface. Verify-only; no cloud operation is performed.",
@@ -47,9 +47,9 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["provider","access_key","secret_key"]
 }`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"valid":{"type":"boolean"},"provider":{"type":"string"},"account":{"type":"string"},"message":{"type":"string"}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			},
 			{
 				Name:        "credential_verify_db",
@@ -66,7 +66,7 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["type","host"]
 }`),
-				Risk:           capkit.RiskMedium,
+				Risk:           core.RiskMedium,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"valid":{"type":"boolean"},"engine":{"type":"string"},"version":{"type":"string"},"message":{"type":"string"}}}`),
 				ExtractTargets: hostPortTargets,
 			},
@@ -84,7 +84,7 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["host","username"]
 }`),
-				Risk:           capkit.RiskMedium,
+				Risk:           core.RiskMedium,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"valid":{"type":"boolean"},"banner":{"type":"string"},"message":{"type":"string"}}}`),
 				ExtractTargets: hostPortTargets,
 			},
@@ -97,13 +97,13 @@ const kitVersion = "0.1.0"
 
 // Call is the envelope shell: every return path from dispatch is normalized so
 // Status/OK/Meta and a clamped Summary hold on success and failure alike.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
 // dispatch routes one tool invocation.
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "credential_verify_cloud":
 		return k.verifyCloud(ctx, call.Input)
@@ -112,24 +112,24 @@ func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, er
 	case "credential_verify_ssh":
 		return k.verifySSH(ctx, call.Input)
 	default:
-		return capkit.FailResult(fmt.Errorf("unknown tool %s", call.Tool)), nil
+		return core.FailResult(fmt.Errorf("unknown tool %s", call.Tool)), nil
 	}
 }
 
-func (k *Kit) verifyCloud(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
+func (k *Kit) verifyCloud(ctx context.Context, input json.RawMessage) (core.Result, error) {
 	var in struct {
 		Provider  string `json:"provider"`
 		AccessKey string `json:"access_key"`
 		SecretKey string `json:"secret_key"`
 	}
 	if err := json.Unmarshal(input, &in); err != nil {
-		return capkit.FailResult(fmt.Errorf("invalid input: %w", err)), nil
+		return core.FailResult(fmt.Errorf("invalid input: %w", err)), nil
 	}
 	res, err := k.Verify(ctx, in.Provider, in.AccessKey, in.SecretKey)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
-	return capkit.SuccessResult(cloudSummary(in.Provider, in.AccessKey, res), res)
+	return core.SuccessResult(cloudSummary(in.Provider, in.AccessKey, res), res)
 }
 
 // cloudSummary names the provider and the masked AK (never the raw key) and
@@ -156,16 +156,16 @@ func cloudSummary(provider, accessKey string, res VerifyResult) string {
 	}
 }
 
-func (k *Kit) verifyDB(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
+func (k *Kit) verifyDB(ctx context.Context, input json.RawMessage) (core.Result, error) {
 	var in DBProbeInput
 	if err := json.Unmarshal(input, &in); err != nil {
-		return capkit.FailResult(fmt.Errorf("invalid input: %w", err)), nil
+		return core.FailResult(fmt.Errorf("invalid input: %w", err)), nil
 	}
 	res, err := VerifyDB(ctx, in)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
-	return capkit.SuccessResult(dbSummary(in, res), res)
+	return core.SuccessResult(dbSummary(in, res), res)
 }
 
 // dbSummary names the engine, the credential target and the read result.
@@ -189,16 +189,16 @@ func dbSummary(in DBProbeInput, res *DBProbeResult) string {
 	return fmt.Sprintf("验证 %s 凭据 %s 连接失败：%s", typ, where, res.Detail)
 }
 
-func (k *Kit) verifySSH(ctx context.Context, input json.RawMessage) (capkit.Result, error) {
+func (k *Kit) verifySSH(ctx context.Context, input json.RawMessage) (core.Result, error) {
 	var in SSHProbeInput
 	if err := json.Unmarshal(input, &in); err != nil {
-		return capkit.FailResult(fmt.Errorf("invalid input: %w", err)), nil
+		return core.FailResult(fmt.Errorf("invalid input: %w", err)), nil
 	}
 	res, err := VerifySSH(ctx, in)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
-	return capkit.SuccessResult(sshSummary(in, res), res)
+	return core.SuccessResult(sshSummary(in, res), res)
 }
 
 // sshSummary names the login target and the permission-surface result.
@@ -230,7 +230,7 @@ func credWhere(user, host string, port int) string {
 }
 
 // hostPortTargets extracts a host:port target from a db/ssh tool input.
-func hostPortTargets(input json.RawMessage) ([]capkit.Target, error) {
+func hostPortTargets(input json.RawMessage) ([]core.Target, error) {
 	var in struct {
 		Host string `json:"host"`
 		Port int    `json:"port"`
@@ -246,10 +246,10 @@ func hostPortTargets(input json.RawMessage) ([]capkit.Target, error) {
 	if in.Port > 0 {
 		hostport = net.JoinHostPort(host, strconv.Itoa(in.Port))
 	}
-	t, err := capkit.TargetFromString(0, hostport)
+	t, err := core.TargetFromString(0, hostport)
 	if err != nil {
 		// Fall back to a bare host target when the host isn't host:port shaped.
-		return []capkit.Target{{Kind: capkit.TargetHost, Host: host}}, nil
+		return []core.Target{{Kind: core.TargetHost, Host: host}}, nil
 	}
-	return []capkit.Target{t}, nil
+	return []core.Target{t}, nil
 }

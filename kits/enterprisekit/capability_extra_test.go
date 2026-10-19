@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // funcProvider 用函数钩子构造可控 provider（用于错误注入与参数断言）。
@@ -71,7 +71,7 @@ func TestKitManifest(t *testing.T) {
 }
 
 func TestKitCallUnknownTool(t *testing.T) {
-	res, err := NewKit(nil).Call(context.Background(), capkit.Call{Tool: "nope"})
+	res, err := NewKit(nil).Call(context.Background(), core.Call{Tool: "nope"})
 	if err != nil {
 		t.Fatalf("Call err = %v", err)
 	}
@@ -81,7 +81,7 @@ func TestKitCallUnknownTool(t *testing.T) {
 }
 
 func TestKitProviders(t *testing.T) {
-	res, err := NewKit(nil).Call(context.Background(), capkit.Call{Tool: "enterprise_providers"})
+	res, err := NewKit(nil).Call(context.Background(), core.Call{Tool: "enterprise_providers"})
 	if err != nil || !res.OK {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
@@ -99,7 +99,7 @@ func TestKitProviders(t *testing.T) {
 
 func TestKitNilResolver(t *testing.T) {
 	var nilKit *Kit
-	res, err := nilKit.Call(context.Background(), capkit.Call{
+	res, err := nilKit.Call(context.Background(), core.Call{
 		Tool:  "enterprise_search",
 		Input: []byte(`{"provider":"aqc","keyword":"x"}`),
 	})
@@ -112,7 +112,7 @@ func TestKitNilResolver(t *testing.T) {
 
 	// Resolver 已配置但显式返回错误。
 	failing := ResolverFunc(func(context.Context, string) (Provider, error) { return nil, errors.New("no session") })
-	res, err = NewKit(failing).Call(context.Background(), capkit.Call{
+	res, err = NewKit(failing).Call(context.Background(), core.Call{
 		Tool:  "enterprise_detail",
 		Input: []byte(`{"provider":"tyc","ext_id":"1"}`),
 	})
@@ -125,10 +125,10 @@ func TestKitSearchBranches(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("非法输入 JSON", func(t *testing.T) {
-		res, err := NewKit(resolver(fakeProvider{name: "fake"})).Call(ctx, capkit.Call{
+		res, err := NewKit(resolver(fakeProvider{name: "fake"})).Call(ctx, core.Call{
 			Tool: "enterprise_search", Input: []byte(`{bad`),
 		})
-		if err != nil || res.OK || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+		if err != nil || res.OK || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 			t.Fatalf("res=%+v err=%v", res, err)
 		}
 	})
@@ -139,7 +139,7 @@ func TestKitSearchBranches(t *testing.T) {
 			gotLimit = limit
 			return []CompanyRef{{ExtID: "1", Name: "A"}}, nil
 		}}
-		res, err := NewKit(resolver(p)).Call(ctx, capkit.Call{
+		res, err := NewKit(resolver(p)).Call(ctx, core.Call{
 			Tool: "enterprise_search", Input: []byte(`{"provider":"cap","keyword":"k"}`),
 		})
 		if err != nil || !res.OK {
@@ -154,7 +154,7 @@ func TestKitSearchBranches(t *testing.T) {
 		p := funcProvider{name: "cap", searchFn: func(context.Context, string, int) ([]CompanyRef, error) {
 			return nil, errors.New("upstream down")
 		}}
-		res, err := NewKit(resolver(p)).Call(ctx, capkit.Call{
+		res, err := NewKit(resolver(p)).Call(ctx, core.Call{
 			Tool: "enterprise_search", Input: []byte(`{"provider":"cap","keyword":"k","limit":3}`),
 		})
 		if err != nil || res.OK || !strings.Contains(res.Summary, "upstream down") {
@@ -168,7 +168,7 @@ func TestKitSearchBranches(t *testing.T) {
 				t.Fatalf("provider 名应被裁剪，得到 %q", name)
 			}
 			return fakeProvider{name: "fake"}, nil
-		})).Call(ctx, capkit.Call{Tool: "enterprise_search", Input: []byte(`{"provider":"  ","keyword":"k"}`)})
+		})).Call(ctx, core.Call{Tool: "enterprise_search", Input: []byte(`{"provider":"  ","keyword":"k"}`)})
 		if err != nil || !res.OK {
 			t.Fatalf("res=%+v err=%v", res, err)
 		}
@@ -179,7 +179,7 @@ func TestKitDetailBranches(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("非法输入 JSON", func(t *testing.T) {
-		res, err := NewKit(resolver(fakeProvider{name: "fake"})).Call(ctx, capkit.Call{
+		res, err := NewKit(resolver(fakeProvider{name: "fake"})).Call(ctx, core.Call{
 			Tool: "enterprise_detail", Input: []byte(`[]`),
 		})
 		if err != nil || res.OK {
@@ -191,7 +191,7 @@ func TestKitDetailBranches(t *testing.T) {
 		p := funcProvider{name: "cap", detailFn: func(context.Context, string) (*CompanyDetail, error) {
 			return nil, errors.New("detail boom")
 		}}
-		res, err := NewKit(resolver(p)).Call(ctx, capkit.Call{
+		res, err := NewKit(resolver(p)).Call(ctx, core.Call{
 			Tool: "enterprise_detail", Input: []byte(`{"provider":"cap","ext_id":"e1"}`),
 		})
 		if err != nil || res.OK || !strings.Contains(res.Summary, "detail boom") {

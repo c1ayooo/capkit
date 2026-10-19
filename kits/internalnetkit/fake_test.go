@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // This file provides the fake Session and fake SessionManager the tests drive.
@@ -14,8 +14,8 @@ import (
 // scripted by the test, so the whole suite is hermetic.
 
 var (
-	_ capkit.Session        = (*scriptedSession)(nil)
-	_ capkit.SessionManager = (*fakeManager)(nil)
+	_ core.Session        = (*scriptedSession)(nil)
+	_ core.SessionManager = (*fakeManager)(nil)
 )
 
 // rule maps a command (matched by substring, first match wins) to an output.
@@ -28,10 +28,10 @@ type rule struct {
 	err        error
 }
 
-// scriptedSession is a capkit.Session that answers from a rule table. It is
+// scriptedSession is a core.Session that answers from a rule table. It is
 // safe for concurrent Exec calls, matching the Session contract.
 type scriptedSession struct {
-	info  capkit.SessionInfo
+	info  core.SessionInfo
 	rules []rule
 
 	mu     sync.Mutex
@@ -39,7 +39,7 @@ type scriptedSession struct {
 	closed bool
 }
 
-func (s *scriptedSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (s *scriptedSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, cmd)
 	rules := s.rules
@@ -47,18 +47,18 @@ func (s *scriptedSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts)
 	for _, r := range rules {
 		if strings.Contains(cmd, r.match) {
 			if r.err != nil {
-				return capkit.Output{Command: cmd}, r.err
+				return core.Output{Command: cmd}, r.err
 			}
-			return capkit.Output{
+			return core.Output{
 				Command: cmd, Stdout: r.stdout, Stderr: r.stderr,
 				ExitCode: r.exit, EvidenceID: r.evidenceID,
 			}, nil
 		}
 	}
-	return capkit.Output{Command: cmd, ExitCode: 0}, nil
+	return core.Output{Command: cmd, ExitCode: 0}, nil
 }
 
-func (s *scriptedSession) Info() capkit.SessionInfo { return s.info }
+func (s *scriptedSession) Info() core.SessionInfo { return s.info }
 
 func (s *scriptedSession) Close() error {
 	s.mu.Lock()
@@ -73,14 +73,14 @@ func (s *scriptedSession) callCount() int {
 	return len(s.calls)
 }
 
-// fakeManager is a capkit.SessionManager backed by an in-memory map.
+// fakeManager is a core.SessionManager backed by an in-memory map.
 type fakeManager struct {
-	sessions map[string]capkit.Session
-	infos    map[string]capkit.SessionInfo
+	sessions map[string]core.Session
+	infos    map[string]core.SessionInfo
 }
 
 func newFakeManager() *fakeManager {
-	return &fakeManager{sessions: map[string]capkit.Session{}, infos: map[string]capkit.SessionInfo{}}
+	return &fakeManager{sessions: map[string]core.Session{}, infos: map[string]core.SessionInfo{}}
 }
 
 func (m *fakeManager) add(s *scriptedSession) {
@@ -88,17 +88,17 @@ func (m *fakeManager) add(s *scriptedSession) {
 	m.infos[s.info.ID] = s.info
 }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, errors.New("not implemented")
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, errors.New("not implemented")
 }
 
-func (m *fakeManager) Get(id string) (capkit.Session, bool) {
+func (m *fakeManager) Get(id string) (core.Session, bool) {
 	s, ok := m.sessions[id]
 	return s, ok
 }
 
-func (m *fakeManager) List() []capkit.SessionInfo {
-	out := make([]capkit.SessionInfo, 0, len(m.infos))
+func (m *fakeManager) List() []core.SessionInfo {
+	out := make([]core.SessionInfo, 0, len(m.infos))
 	for _, i := range m.infos {
 		out = append(out, i)
 	}
@@ -113,8 +113,8 @@ func (m *fakeManager) Close(id string) error {
 
 // capWith builds a capability wired to the given manager, or a bare one when
 // manager is nil (the missing-port path).
-func capWith(manager capkit.SessionManager) *Capability {
-	c, err := NewCapability(capkit.Deps{Sessions: manager})
+func capWith(manager core.SessionManager) *Capability {
+	c, err := NewCapability(core.Deps{Sessions: manager})
 	if err != nil {
 		panic(err)
 	}

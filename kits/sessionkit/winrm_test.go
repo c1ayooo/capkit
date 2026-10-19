@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/httpx"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 )
@@ -77,7 +77,7 @@ func TestWinRMSessionExec(t *testing.T) {
 	m := sessionkit.NewManager(nil, nil)
 	m.RegisterOpener("winrm", &sessionkit.WinRMOpener{HTTP: httpClient, Port: port})
 
-	info, err := m.Open(context.Background(), capkit.SessionSpec{
+	info, err := m.Open(context.Background(), core.SessionSpec{
 		Kind: "winrm", Host: host, User: "Administrator", Secret: "pw",
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func TestWinRMSessionExec(t *testing.T) {
 		t.Fatalf("info = %+v", info)
 	}
 	s, _ := m.Get(info.ID)
-	out, err := s.Exec(context.Background(), "whoami", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "whoami", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestWinRMSessionExec(t *testing.T) {
 
 func TestWinRMOpenerFailClosedWithoutHTTP(t *testing.T) {
 	o := &sessionkit.WinRMOpener{}
-	if _, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "winrm", Host: "127.0.0.1"}); err == nil {
+	if _, err := o.Open(context.Background(), core.SessionSpec{Kind: "winrm", Host: "127.0.0.1"}); err == nil {
 		t.Fatal("WinRM opener without HTTPDoer must fail closed")
 	}
 }
@@ -119,7 +119,7 @@ func TestWinRMScopeDenied(t *testing.T) {
 	scope := gates.StaticScope("10.0.0.1") // not the test host
 	httpClient := httpx.New(scope, gates.NewLimiter(), nil)
 	o := &sessionkit.WinRMOpener{HTTP: httpClient, Port: port}
-	if _, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "winrm", Host: host}); err == nil {
+	if _, err := o.Open(context.Background(), core.SessionSpec{Kind: "winrm", Host: host}); err == nil {
 		t.Fatal("out-of-scope WinRM target must be denied")
 	}
 }

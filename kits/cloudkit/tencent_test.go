@@ -9,13 +9,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 	tcerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
 )
 
 // These tests are fully offline. They drive the provider through a fake
-// capkit.HTTPDoer, so the assertions prove two things at once: the tencentcloud
+// core.HTTPDoer, so the assertions prove two things at once: the tencentcloud
 // SDK signed the request (it had to, to produce the Authorization header) and
 // every request went out through the injected port (the fake is the only
 // transport).
@@ -248,10 +248,10 @@ func TestTencentListStorageObjectsViaInjectedDoer(t *testing.T) {
 type actionDoer struct {
 	mu      sync.Mutex
 	bodies  map[string]string
-	replies []capkit.Request
+	replies []core.Request
 }
 
-func (d *actionDoer) Do(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (d *actionDoer) Do(_ context.Context, req core.Request) (*core.Response, error) {
 	d.mu.Lock()
 	d.replies = append(d.replies, req)
 	d.mu.Unlock()
@@ -259,12 +259,12 @@ func (d *actionDoer) Do(_ context.Context, req capkit.Request) (*capkit.Response
 	if !ok {
 		body = `{"Response":{}}`
 	}
-	return &capkit.Response{Status: 200, Body: []byte(body), FinalURL: req.URL}, nil
+	return &core.Response{Status: 200, Body: []byte(body), FinalURL: req.URL}, nil
 }
 
 // headerValue reads a header case-insensitively: net/http canonicalizes
 // "X-TC-Action" to "X-Tc-Action", so an exact-key lookup would miss it.
-func headerValue(req capkit.Request, name string) string {
+func headerValue(req core.Request, name string) string {
 	for k, v := range req.Headers {
 		if strings.EqualFold(k, name) {
 			return v
@@ -273,10 +273,10 @@ func headerValue(req capkit.Request, name string) string {
 	return ""
 }
 
-func (d *actionDoer) calls() []capkit.Request {
+func (d *actionDoer) calls() []core.Request {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return append([]capkit.Request(nil), d.replies...)
+	return append([]core.Request(nil), d.replies...)
 }
 
 func TestTencentListIAMViaInjectedDoer(t *testing.T) {
@@ -442,7 +442,7 @@ func TestClassifyTencentUnknownCodeFallsBack(t *testing.T) {
 }
 
 func TestClassifyTencentPassesCapkitErrorThrough(t *testing.T) {
-	blocked := capkit.ScopeDenied("out of scope")
+	blocked := core.ScopeDenied("out of scope")
 	got := classifyTencent(blocked)
 	if got != error(blocked) {
 		t.Fatalf("宿主门禁错误被覆盖：得到 %#v，期望原样返回 %#v", got, blocked)
@@ -513,16 +513,16 @@ func TestTencentNilDoerIsUnavailable(t *testing.T) {
 	if _, err := p.Verify(context.Background(), Credentials{AccessKey: "a", SecretKey: "b"}); err == nil {
 		t.Fatalf("nil doer 应返回 unavailable")
 	} else {
-		var ce *capkit.Error
-		if !errors.As(err, &ce) || ce.Code != capkit.CodeUnavailable {
+		var ce *core.Error
+		if !errors.As(err, &ce) || ce.Code != core.CodeUnavailable {
 			t.Fatalf("期望 unavailable，得到 %#v", err)
 		}
 	}
 	if _, err := p.ListStorage(context.Background(), Credentials{AccessKey: "a", SecretKey: "b"}, StorageRequest{}); err == nil {
 		t.Fatalf("nil doer 应返回 unavailable")
 	} else {
-		var ce *capkit.Error
-		if !errors.As(err, &ce) || ce.Code != capkit.CodeUnavailable {
+		var ce *core.Error
+		if !errors.As(err, &ce) || ce.Code != core.CodeUnavailable {
 			t.Fatalf("ListStorage 期望 unavailable，得到 %#v", err)
 		}
 	}

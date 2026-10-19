@@ -5,13 +5,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type bucket struct {
 	tokens float64
 	last   time.Time
-	spec   capkit.RateLimitSpec
+	spec   core.RateLimitSpec
 }
 
 // Limiter is a per-key token bucket plus a per-key concurrency semaphore.
@@ -39,7 +39,7 @@ func NewLimiterWithClock(now func() time.Time) *Limiter {
 	}
 }
 
-func (l *Limiter) Acquire(ctx context.Context, key string, spec capkit.RateLimitSpec) (func(), error) {
+func (l *Limiter) Acquire(ctx context.Context, key string, spec core.RateLimitSpec) (func(), error) {
 	spec = spec.Normalized()
 	if spec.PerSecond <= 0 {
 		spec.PerSecond = 5
@@ -61,11 +61,11 @@ func (l *Limiter) Acquire(ctx context.Context, key string, spec capkit.RateLimit
 	case slot <- struct{}{}:
 		return func() { <-slot }, nil
 	case <-ctx.Done():
-		return nil, capkit.NewError(capkit.CodeRateLimited, "rate limit wait cancelled")
+		return nil, core.NewError(core.CodeRateLimited, "rate limit wait cancelled")
 	}
 }
 
-func (l *Limiter) waitToken(ctx context.Context, key string, spec capkit.RateLimitSpec) error {
+func (l *Limiter) waitToken(ctx context.Context, key string, spec core.RateLimitSpec) error {
 	for {
 		l.mu.Lock()
 		b := l.buckets[key]
@@ -96,7 +96,7 @@ func (l *Limiter) waitToken(ctx context.Context, key string, spec capkit.RateLim
 		case <-timer.C:
 		case <-ctx.Done():
 			timer.Stop()
-			return capkit.NewError(capkit.CodeRateLimited, "rate limit wait cancelled")
+			return core.NewError(core.CodeRateLimited, "rate limit wait cancelled")
 		}
 	}
 }

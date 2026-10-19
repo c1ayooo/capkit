@@ -14,7 +14,7 @@
 // list of named files/logs (never "*"), and an empty scope is an error rather
 // than "everything" ("禁止一键清空", docs §4.8).
 //
-// Everything runs THROUGH a capkit.Session resolved from capkit.Deps.Sessions.
+// Everything runs THROUGH a core.Session resolved from core.Deps.Sessions.
 package cleanupkit
 
 import (
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 const (
@@ -40,63 +40,63 @@ const (
 	perCmdTimeout  = 15 * time.Second
 )
 
-// Capability exposes the cleanup tools. It depends only on capkit.Deps.
+// Capability exposes the cleanup tools. It depends only on core.Deps.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 }
 
 // NewCapability builds the cleanup capability.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // Manifest declares the cleanup tool surface.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: kitName, Version: kitVersion, APIVersion: apiVersion,
 		Requires: []string{"scope", "limiter", "audit", "sessions"},
-		Tools:    []capkit.ToolSpec{previewSpec(), applySpec()},
+		Tools:    []core.ToolSpec{previewSpec(), applySpec()},
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the cleanup tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "cleanup_preview":
 		return c.preview(ctx, call)
 	case "cleanup_apply":
 		return c.apply(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) session(id string) (capkit.Session, *capkit.Error) {
+func (c *Capability) session(id string) (core.Session, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	if strings.TrimSpace(id) == "" {
-		return nil, capkit.InvalidInput("session_id 必填")
+		return nil, core.InvalidInput("session_id 必填")
 	}
 	s, ok := c.deps.Sessions.Get(id)
 	if !ok {
-		return nil, capkit.NotFound("会话不存在: " + id)
+		return nil, core.NotFound("会话不存在: " + id)
 	}
 	return s, nil
 }
 
-func (c *Capability) run(ctx context.Context, s capkit.Session, cmd string, timeout time.Duration) (capkit.Output, bool) {
-	out, err := s.Exec(ctx, cmd, capkit.ExecOpts{Timeout: timeout, MaxOutput: 128 << 10})
+func (c *Capability) run(ctx context.Context, s core.Session, cmd string, timeout time.Duration) (core.Output, bool) {
+	out, err := s.Exec(ctx, cmd, core.ExecOpts{Timeout: timeout, MaxOutput: 128 << 10})
 	if err != nil {
-		return capkit.Output{Command: cmd}, false
+		return core.Output{Command: cmd}, false
 	}
 	return out, true
 }
 
-func detectPlatform(ctx context.Context, c *Capability, s capkit.Session, to time.Duration) string {
+func detectPlatform(ctx context.Context, c *Capability, s core.Session, to time.Duration) string {
 	if os := strings.ToLower(strings.TrimSpace(s.Info().OS)); os != "" {
 		if strings.Contains(os, "win") {
 			return "windows"
@@ -136,7 +136,7 @@ type applyInput struct {
 	Backup  *bool  `json:"backup,omitempty"`
 }
 
-func (in *previewInput) normalize() *capkit.Error {
+func (in *previewInput) normalize() *core.Error {
 	// A paths list is sugar for file-scope entries.
 	for _, p := range in.Paths {
 		if strings.TrimSpace(p) != "" {
@@ -150,18 +150,18 @@ func (in *previewInput) normalize() *capkit.Error {
 			in.Scope[i].Kind = "file"
 		}
 		if in.Scope[i].Path == "" {
-			return capkit.InvalidInput(fmt.Sprintf("scope[%d].path 必填", i))
+			return core.InvalidInput(fmt.Sprintf("scope[%d].path 必填", i))
 		}
 		if in.Scope[i].Pattern == "" {
 			in.Scope[i].Pattern = strings.TrimSpace(in.Pattern)
 		}
 		// Reject wildcard/whole-tree selectors: cleanup must be bounded.
 		if isBlanket(in.Scope[i].Path) {
-			return capkit.InvalidInput("拒绝通配/根目录路径: " + in.Scope[i].Path + "（清理必须限定具体文件/日志）")
+			return core.InvalidInput("拒绝通配/根目录路径: " + in.Scope[i].Path + "（清理必须限定具体文件/日志）")
 		}
 	}
 	if len(in.Scope) == 0 {
-		return capkit.InvalidInput("scope 不能为空；清理必须显式指定具体文件/日志，禁止一键清空")
+		return core.InvalidInput("scope 不能为空；清理必须显式指定具体文件/日志，禁止一键清空")
 	}
 	return nil
 }
@@ -181,12 +181,12 @@ func isBlanket(path string) bool {
 
 // ---- tool specs ----
 
-func previewSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func previewSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "cleanup_preview",
 		Description: "只读预览：枚举将会被清理的痕迹（日志、命令历史、wtmp/btmp/lastlog、Windows 事件日志、指定文件），返回可复核的差异（命中行数/样例）、将执行的精确命令，以及 plan_id。不修改任何东西。清理必须先预览，禁止一键清空。",
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 3, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -212,12 +212,12 @@ func previewSpec() capkit.ToolSpec {
 	}
 }
 
-func applySpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func applySpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "cleanup_apply",
 		Description: "执行 cleanup_preview 生成的清理计划。高风险：runtime 会强制审批与范围校验；必须携带 preview 返回的 plan_id 且 confirm=true，且重算的计划哈希必须与 plan_id 一致——否则拒绝执行（防止跳过预览或事后扩大范围）。默认先备份再删除。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 1, Burst: 1, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -246,85 +246,85 @@ func applySpec() capkit.ToolSpec {
 
 // ---- handlers ----
 
-func (c *Capability) preview(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) preview(ctx context.Context, call core.Call) (core.Result, error) {
 	var in previewInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	platform := strings.ToLower(strings.TrimSpace(in.Platform))
 	if platform == "" || platform == "auto" {
-		platform = detectPlatform(ctx, c, s, capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout))
+		platform = detectPlatform(ctx, c, s, core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout))
 	}
 	in.Platform = platform
 	if e := in.normalize(); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	plan, e := buildCleanupPlan(in)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	// Read-only probing: gather match counts/samples so a human can review.
 	targets := make([]targetPreview, 0, len(plan.Targets))
-	var raws []capkit.Output
+	var raws []core.Output
 	total := 0
 	for _, t := range plan.Targets {
 		tp := targetPreview{Kind: t.Kind, Path: t.Path, Pattern: t.Pattern}
 		if t.PreviewCmd != "" {
 			if o, ok := c.run(ctx, s, t.PreviewCmd, perCmdTimeout); ok && o.ExitCode == 0 {
 				tp.Matched = parseInt(o.Stdout)
-				tp.Sample = capkit.Truncate(strings.TrimSpace(o.Stdout), 512)
+				tp.Sample = core.Truncate(strings.TrimSpace(o.Stdout), 512)
 				raws = append(raws, o)
 			}
 		}
 		total += tp.Matched
 		targets = append(targets, tp)
 	}
-	data, _ := capkit.DataResult(map[string]any{
+	data, _ := core.DataResult(map[string]any{
 		"plan_id": plan.ID, "platform": platform, "targets": targets,
 		"commands": plan.commandsView(), "total_matched": total,
 	})
-	data.Summary = capkit.ClampSummary(fmt.Sprintf("预览：%d 个痕迹来源，预计命中 %d 项（未做任何修改）；确认后携带 plan_id=%s 执行 cleanup_apply", len(targets), total, plan.ID))
-	data.Evidence = capkit.EvidenceRefs(raws...)
-	data.Next = []capkit.NextStep{{
+	data.Summary = core.ClampSummary(fmt.Sprintf("预览：%d 个痕迹来源，预计命中 %d 项（未做任何修改）；确认后携带 plan_id=%s 执行 cleanup_apply", len(targets), total, plan.ID))
+	data.Evidence = core.EvidenceRefs(raws...)
+	data.Next = []core.NextStep{{
 		Tool:          "cleanup_apply",
 		Reason:        "复核预览后，携带 plan_id 与 confirm=true 执行清理",
-		Risk:          capkit.RiskHigh,
+		Risk:          core.RiskHigh,
 		Preconditions: []string{"cleanup.previewed", "human.confirmed"},
 		Params:        mustJSON(map[string]string{"plan_id": plan.ID}),
 	}}
 	return data, nil
 }
 
-func (c *Capability) apply(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) apply(ctx context.Context, call core.Call) (core.Result, error) {
 	var in applyInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	if !in.Confirm {
-		return capkit.FailResult(capkit.NeedHuman("cleanup_apply 需要 confirm=true（清理不可逆，须人工确认）")), nil
+		return core.FailResult(core.NeedHuman("cleanup_apply 需要 confirm=true（清理不可逆，须人工确认）")), nil
 	}
 	platform := strings.ToLower(strings.TrimSpace(in.Platform))
 	if platform == "" || platform == "auto" {
-		platform = detectPlatform(ctx, c, s, capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout))
+		platform = detectPlatform(ctx, c, s, core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout))
 	}
 	in.Platform = platform
 	if e := in.normalize(); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	plan, e := buildCleanupPlan(in.previewInput)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	if strings.TrimSpace(in.PlanID) == "" || in.PlanID != plan.ID {
-		return capkit.FailResult(capkit.Conflict(
+		return core.FailResult(core.Conflict(
 			fmt.Sprintf("plan_id 不匹配：期望 %s，收到 %q。必须先 cleanup_preview 并原样回传 plan_id，防止跳过预览或事后扩大范围", plan.ID, in.PlanID),
 		)), nil
 	}
@@ -332,7 +332,7 @@ func (c *Capability) apply(ctx context.Context, call capkit.Call) (capkit.Result
 	if in.Backup != nil {
 		backup = *in.Backup
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	type targetResult struct {
 		Path     string `json:"path"`
 		Kind     string `json:"kind"`
@@ -342,7 +342,7 @@ func (c *Capability) apply(ctx context.Context, call capkit.Call) (capkit.Result
 		Output   string `json:"output,omitempty"`
 	}
 	results := make([]targetResult, 0, len(plan.Targets))
-	var raws []capkit.Output
+	var raws []core.Output
 	failed := 0
 	for _, t := range plan.Targets {
 		tr := targetResult{Path: t.Path, Kind: t.Kind}
@@ -351,7 +351,7 @@ func (c *Capability) apply(ctx context.Context, call capkit.Call) (capkit.Result
 			if !ok || o.ExitCode != 0 {
 				failed++
 				tr.ExitCode = o.ExitCode
-				tr.Output = capkit.Truncate(strings.TrimSpace(o.Stderr+o.Stdout), 512)
+				tr.Output = core.Truncate(strings.TrimSpace(o.Stderr+o.Stdout), 512)
 				raws = append(raws, o)
 				break
 			}
@@ -363,19 +363,19 @@ func (c *Capability) apply(ctx context.Context, call capkit.Call) (capkit.Result
 		}
 		results = append(results, tr)
 	}
-	status := capkit.StatusSuccess
+	status := core.StatusSuccess
 	summary := fmt.Sprintf("已清理 %d 个痕迹来源（plan %s）", len(results), plan.ID)
 	if failed > 0 {
-		status = capkit.StatusPartial
+		status = core.StatusPartial
 		summary = fmt.Sprintf("清理完成：%d/%d 失败（plan %s）", failed, len(results), plan.ID)
 	}
-	data, _ := capkit.DataResult(map[string]any{
+	data, _ := core.DataResult(map[string]any{
 		"plan_id": plan.ID, "applied": failed == 0, "targets": results,
 	})
 	data.Status = status
-	data.OK = status == capkit.StatusSuccess
-	data.Summary = capkit.ClampSummary(summary)
-	data.Evidence = capkit.EvidenceRefs(raws...)
+	data.OK = status == core.StatusSuccess
+	data.Summary = core.ClampSummary(summary)
+	data.Evidence = core.EvidenceRefs(raws...)
 	return data, nil
 }
 
@@ -424,13 +424,13 @@ func (t cleanupTarget) applySteps(backup bool) []string {
 }
 
 func (t cleanupTarget) BackupCmd() string {
-	return fmt.Sprintf("cp -p %s %s 2>/dev/null || true", capkit.ShellQuote(t.Path), capkit.ShellQuote(t.Path+".capkit-bak"))
+	return fmt.Sprintf("cp -p %s %s 2>/dev/null || true", core.ShellQuote(t.Path), core.ShellQuote(t.Path+".capkit-bak"))
 }
 
 // buildCleanupPlan turns a normalized input into a deterministic plan. The ID
 // is a hash over the exact target/command set, so any change to scope after a
 // preview produces a different ID and cleanup_apply refuses the stale one.
-func buildCleanupPlan(in previewInput) (cleanupPlan, *capkit.Error) {
+func buildCleanupPlan(in previewInput) (cleanupPlan, *core.Error) {
 	platform := strings.ToLower(strings.TrimSpace(in.Platform))
 	plan := cleanupPlan{}
 	for _, sc := range in.Scope {

@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // This file maps enumeration Signals to ranked candidate exploits as
-// capkit.NextStep values. It deliberately stops at the library boundary from the
+// core.NextStep values. It deliberately stops at the library boundary from the
 // design doc ("识别与决策在库内，成品载荷在库外"): it identifies and ranks
 // candidates and states the reason, but never builds or runs a payload. The
 // suggested Tool is the in-library session_exec, because the out-of-library
@@ -40,13 +40,13 @@ var dangerousCaps = []string{
 
 type candidate struct {
 	rank int
-	step capkit.NextStep
+	step core.NextStep
 }
 
 // advise ranks candidate exploits derived from Signals, most promising first.
-func advise(sig Signals) []capkit.NextStep {
+func advise(sig Signals) []core.NextStep {
 	var cands []candidate
-	add := func(rank int, step capkit.NextStep) {
+	add := func(rank int, step core.NextStep) {
 		cands = append(cands, candidate{rank: rank, step: step})
 	}
 
@@ -59,14 +59,14 @@ func advise(sig Signals) []capkit.NextStep {
 
 	// Stable sort by descending rank; ties keep insertion order.
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].rank > cands[j].rank })
-	out := make([]capkit.NextStep, 0, len(cands))
+	out := make([]core.NextStep, 0, len(cands))
 	for _, c := range cands {
 		out = append(out, c.step)
 	}
 	return out
 }
 
-func adviseLinux(sig Signals, add func(int, capkit.NextStep)) {
+func adviseLinux(sig Signals, add func(int, core.NextStep)) {
 	// Full, passwordless sudo is a direct win.
 	for _, r := range sig.SudoRules {
 		up := strings.ToUpper(strings.TrimSpace(r.Command))
@@ -122,7 +122,7 @@ func adviseLinux(sig Signals, add func(int, capkit.NextStep)) {
 	}
 }
 
-func adviseWindows(sig Signals, add func(int, capkit.NextStep)) {
+func adviseWindows(sig Signals, add func(int, core.NextStep)) {
 	for _, p := range sig.WhoamiPrivileges {
 		if p.State != "Enabled" {
 			continue
@@ -162,7 +162,7 @@ func adviseWindows(sig Signals, add func(int, capkit.NextStep)) {
 // exploitStep builds the standard candidate NextStep. Params carries the
 // machine-readable candidate so a host or planner can filter/rank by vector
 // without parsing Reason.
-func exploitStep(key, reason string, params map[string]any) capkit.NextStep {
+func exploitStep(key, reason string, params map[string]any) core.NextStep {
 	if params == nil {
 		params = map[string]any{}
 	}
@@ -170,14 +170,14 @@ func exploitStep(key, reason string, params map[string]any) capkit.NextStep {
 		params["candidate"] = key
 	}
 	raw, _ := json.Marshal(params)
-	return capkit.NextStep{
+	return core.NextStep{
 		Tool:   toolSessionExec,
 		Reason: reason,
 		Preconditions: []string{
 			"需要库外成品 exploit 载荷（本库只做识别与决策）",
 			"会话可执行命令",
 		},
-		Risk:   capkit.RiskHigh,
+		Risk:   core.RiskHigh,
 		Params: raw,
 	}
 }

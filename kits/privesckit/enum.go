@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Platform selectors for privesc_enum / platform-pinned variants.
@@ -105,7 +105,7 @@ type enumResult struct {
 // runEnumeration executes the bounded command set for platform and folds the
 // output into Signals. A single failed command is recorded and skipped; the run
 // only fails when every command failed, which means the session is unusable.
-func runEnumeration(ctx context.Context, s capkit.Session, platform string) (enumResult, error) {
+func runEnumeration(ctx context.Context, s core.Session, platform string) (enumResult, error) {
 	cmds := linuxEnumCommands
 	if platform == platformWindows {
 		cmds = windowsEnumCommands
@@ -115,7 +115,7 @@ func runEnumeration(ctx context.Context, s capkit.Session, platform string) (enu
 	var firstErr error
 	ok := 0
 	for _, ec := range cmds {
-		out, err := s.Exec(ctx, ec.Command, capkit.ExecOpts{Timeout: enumTimeout, MaxOutput: enumMaxOutput})
+		out, err := s.Exec(ctx, ec.Command, core.ExecOpts{Timeout: enumTimeout, MaxOutput: enumMaxOutput})
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -146,7 +146,7 @@ func buildSignals(platform string, outs map[string]string) Signals {
 	sig := Signals{Platform: platform}
 	switch platform {
 	case platformLinux:
-		sig.Kernel = parseKernelVersion(capkit.FirstNonEmpty(outs["kernel_version"], outs["uname"]))
+		sig.Kernel = parseKernelVersion(core.FirstNonEmpty(outs["kernel_version"], outs["uname"]))
 		sig.OSInfo = parseOSRelease(outs["os_release"])
 		sig.SudoRules = parseSudoL(outs["sudo_l"])
 		sig.SUIDBinaries = parseSUID(outs["suid"])

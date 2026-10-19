@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"gopkg.in/yaml.v3"
 )
 
 // Fetcher downloads rule sources. It is deliberately separate from
-// capkit.HTTPDoer: rule sources are external infrastructure, not in-scope
+// core.HTTPDoer: rule sources are external infrastructure, not in-scope
 // targets, so the host supplies a download client/proxy.
 type Fetcher interface {
 	Fetch(ctx context.Context, url string) ([]byte, error)
@@ -151,7 +151,7 @@ func parseDDDD(data []byte, source string) ([]Rule, error) {
 		if name == "" {
 			continue
 		}
-		r := Rule{ID: source + "/" + name, Name: name, Product: capkit.FirstNonEmpty(stringValue(item["product"]), name), Source: source}
+		r := Rule{ID: source + "/" + name, Name: name, Product: core.FirstNonEmpty(stringValue(item["product"]), name), Source: source}
 		for _, key := range []string{"keyword", "body", "html", "rule"} {
 			for _, v := range stringList(item[key]) {
 				r.Patterns = append(r.Patterns, Pattern{Type: "body", Value: v})

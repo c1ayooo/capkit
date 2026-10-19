@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/exec"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
@@ -39,7 +39,7 @@ func (fakeExecutor) File(_ context.Context, _ shellsession.Session, op shellsess
 
 func newRuntime(t *testing.T) (*runtime.Runtime, *sessionkit.Manager) {
 	t.Helper()
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterSession(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestSessionOpenExecClose(t *testing.T) {
 	ctx := context.Background()
 
 	open, _ := json.Marshal(map[string]any{"kind": "webshell", "host": "http://127.0.0.1/shell.php"})
-	res, err := rt.Call(ctx, "session_open", open, capkit.CallContext{ProjectID: 1, Actor: "t"})
+	res, err := rt.Call(ctx, "session_open", open, core.CallContext{ProjectID: 1, Actor: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("open status = %q summary=%q", res.Status, res.Summary)
 	}
 	var data map[string]any
@@ -84,11 +84,11 @@ func TestSessionOpenExecClose(t *testing.T) {
 	}
 
 	execIn, _ := json.Marshal(map[string]any{"session_id": id, "command": "whoami"})
-	execRes, err := rt.Call(ctx, "session_exec", execIn, capkit.CallContext{ProjectID: 1})
+	execRes, err := rt.Call(ctx, "session_exec", execIn, core.CallContext{ProjectID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if execRes.Status != capkit.StatusSuccess {
+	if execRes.Status != core.StatusSuccess {
 		t.Fatalf("exec status = %q", execRes.Status)
 	}
 	if !strings.Contains(string(execRes.Data), "OUT:whoami") {
@@ -99,24 +99,24 @@ func TestSessionOpenExecClose(t *testing.T) {
 	}
 
 	// list shows the session
-	listRes, _ := rt.Call(ctx, "session_list", json.RawMessage(`{}`), capkit.CallContext{ProjectID: 1})
+	listRes, _ := rt.Call(ctx, "session_list", json.RawMessage(`{}`), core.CallContext{ProjectID: 1})
 	if !strings.Contains(string(listRes.Data), id) {
 		t.Fatalf("list data = %s", listRes.Data)
 	}
 
 	closeIn, _ := json.Marshal(map[string]any{"session_id": id})
-	closeRes, err := rt.Call(ctx, "session_close", closeIn, capkit.CallContext{ProjectID: 1})
-	if err != nil || closeRes.Status != capkit.StatusSuccess {
+	closeRes, err := rt.Call(ctx, "session_close", closeIn, core.CallContext{ProjectID: 1})
+	if err != nil || closeRes.Status != core.StatusSuccess {
 		t.Fatalf("close = %v %q", err, closeRes.Status)
 	}
 
 	// exec after close → not_found. A distinct TaskID avoids the idempotency
 	// cache (identical input+context would legitimately reuse the first result).
-	again, err := rt.Call(ctx, "session_exec", execIn, capkit.CallContext{ProjectID: 1, TaskID: "after-close"})
+	again, err := rt.Call(ctx, "session_exec", execIn, core.CallContext{ProjectID: 1, TaskID: "after-close"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Status != capkit.StatusFailed || again.Error.Code != capkit.CodeNotFound {
+	if again.Status != core.StatusFailed || again.Error.Code != core.CodeNotFound {
 		t.Fatalf("expected not_found, got %q %+v", again.Status, again.Error)
 	}
 }
@@ -125,20 +125,20 @@ func TestSessionUploadDownload(t *testing.T) {
 	rt, _ := newRuntime(t)
 	ctx := context.Background()
 	open, _ := json.Marshal(map[string]any{"kind": "webshell", "host": "http://127.0.0.1/shell.php"})
-	res, _ := rt.Call(ctx, "session_open", open, capkit.CallContext{ProjectID: 1})
+	res, _ := rt.Call(ctx, "session_open", open, core.CallContext{ProjectID: 1})
 	var data map[string]any
 	_ = json.Unmarshal(res.Data, &data)
 	id := data["session_id"].(string)
 
 	up, _ := json.Marshal(map[string]any{"session_id": id, "remote": "/tmp/x", "content": "hello"})
-	upRes, _ := rt.Call(ctx, "session_upload", up, capkit.CallContext{ProjectID: 1})
-	if upRes.Status != capkit.StatusSuccess {
+	upRes, _ := rt.Call(ctx, "session_upload", up, core.CallContext{ProjectID: 1})
+	if upRes.Status != core.StatusSuccess {
 		t.Fatalf("upload status = %q", upRes.Status)
 	}
 
 	dl, _ := json.Marshal(map[string]any{"session_id": id, "remote": "/tmp/x"})
-	dlRes, _ := rt.Call(ctx, "session_download", dl, capkit.CallContext{ProjectID: 1})
-	if dlRes.Status != capkit.StatusSuccess {
+	dlRes, _ := rt.Call(ctx, "session_download", dl, core.CallContext{ProjectID: 1})
+	if dlRes.Status != core.StatusSuccess {
 		t.Fatalf("download status = %q", dlRes.Status)
 	}
 	// The fake returns base64("file-content"); the adapter decodes it. No
@@ -155,11 +155,11 @@ func TestSessionUploadDownload(t *testing.T) {
 func TestSessionExecMissingSession(t *testing.T) {
 	rt, _ := newRuntime(t)
 	in, _ := json.Marshal(map[string]any{"session_id": "nope", "command": "id"})
-	res, err := rt.Call(context.Background(), "session_exec", in, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "session_exec", in, core.CallContext{ProjectID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("error = %+v", res.Error)
 	}
 }
@@ -167,17 +167,17 @@ func TestSessionExecMissingSession(t *testing.T) {
 func TestSessionOpenScopeDenied(t *testing.T) {
 	rt, _ := newRuntime(t)
 	in, _ := json.Marshal(map[string]any{"kind": "cli", "host": "example.com"})
-	res, err := rt.Call(context.Background(), "session_open", in, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "session_open", in, core.CallContext{ProjectID: 1})
 	if err == nil {
 		t.Fatal("expected scope denial")
 	}
-	if res.Status != capkit.StatusBlocked {
+	if res.Status != core.StatusBlocked {
 		t.Fatalf("status = %q", res.Status)
 	}
 }
 
 func TestSessionMissingManagerFailsClosed(t *testing.T) {
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterSession(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestSessionToolsRegisteredWithSchemas(t *testing.T) {
 	}
 	// webshell_deploy writes executable content, so it must be approval-gated.
 	for _, tool := range m.Tools {
-		if tool.Name == "webshell_deploy" && tool.Risk != capkit.RiskHigh {
+		if tool.Name == "webshell_deploy" && tool.Risk != core.RiskHigh {
 			t.Fatalf("webshell_deploy risk = %q, want high", tool.Risk)
 		}
 	}
@@ -229,16 +229,16 @@ func TestSessionToolsRegisteredWithSchemas(t *testing.T) {
 }
 
 // recordingEvidence captures evidence records for assertions.
-type recordingEvidence struct{ records []capkit.Evidence }
+type recordingEvidence struct{ records []core.Evidence }
 
-func (e *recordingEvidence) Record(_ context.Context, ev capkit.Evidence) (string, error) {
+func (e *recordingEvidence) Record(_ context.Context, ev core.Evidence) (string, error) {
 	e.records = append(e.records, ev)
 	return "ev_shell_1", nil
 }
 
-func newRuntimeWithEvidence(t *testing.T, ev capkit.EvidenceSink) *runtime.Runtime {
+func newRuntimeWithEvidence(t *testing.T, ev core.EvidenceSink) *runtime.Runtime {
 	t.Helper()
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterSession(reg); err != nil {
 		t.Fatal(err)
 	}
@@ -262,11 +262,11 @@ func newRuntimeWithEvidence(t *testing.T, ev capkit.EvidenceSink) *runtime.Runti
 func openSession(t *testing.T, rt *runtime.Runtime, kind, host string) string {
 	t.Helper()
 	in, _ := json.Marshal(map[string]any{"kind": kind, "host": host})
-	res, err := rt.Call(context.Background(), "session_open", in, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "session_open", in, core.CallContext{ProjectID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("open %s = %q %s", kind, res.Status, res.Summary)
 	}
 	var data map[string]any
@@ -286,11 +286,11 @@ func TestSessionDownloadStoresFileAsEvidence(t *testing.T) {
 	id := openSession(t, rt, "webshell", "http://127.0.0.1/shell.php")
 
 	in, _ := json.Marshal(map[string]any{"session_id": id, "remote": "/tmp/x"})
-	res, err := rt.Call(context.Background(), "session_download", in, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "session_download", in, core.CallContext{ProjectID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("download = %q %s", res.Status, res.Summary)
 	}
 	if strings.Contains(string(res.Data), "file-content") {
@@ -318,11 +318,11 @@ func TestSessionExecRecordsOutputWithoutTransportEvidence(t *testing.T) {
 	id := openSession(t, rt, "cli", "local")
 
 	in, _ := json.Marshal(map[string]any{"session_id": id, "command": "echo evidence-path"})
-	res, err := rt.Call(context.Background(), "session_exec", in, capkit.CallContext{ProjectID: 1})
+	res, err := rt.Call(context.Background(), "session_exec", in, core.CallContext{ProjectID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("exec = %q %s", res.Status, res.Summary)
 	}
 	if len(res.Evidence) != 1 || res.Evidence[0].Kind != "command_output" {

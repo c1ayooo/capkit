@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // AuthKinds is the closed set of flow kinds a host may register (docs §5.2).
@@ -40,19 +40,19 @@ func NormalizeAuthKind(kind string) (string, error) {
 // identity_login fills with the requested target.
 type AuthFlowRegistry struct {
 	mu    sync.RWMutex
-	flows map[string]capkit.AuthFlow
+	flows map[string]core.AuthFlow
 }
 
 // NewAuthFlowRegistry builds an empty registry.
 func NewAuthFlowRegistry() *AuthFlowRegistry {
-	return &AuthFlowRegistry{flows: map[string]capkit.AuthFlow{}}
+	return &AuthFlowRegistry{flows: map[string]core.AuthFlow{}}
 }
 
 // Register adds one flow under its own Kind(). Registering a kind twice is an
 // error rather than a silent overwrite: a host that means to replace a flow
 // should say so, and a surprising replacement would send credentials to the
 // wrong site.
-func (r *AuthFlowRegistry) Register(flow capkit.AuthFlow) error {
+func (r *AuthFlowRegistry) Register(flow core.AuthFlow) error {
 	if flow == nil {
 		return fmt.Errorf("flow 不能为空")
 	}
@@ -72,11 +72,11 @@ func (r *AuthFlowRegistry) Register(flow capkit.AuthFlow) error {
 // RegisterSite registers a site login in one line: the kind plus the function
 // that performs it. This is the seam a host assembles a site-level login
 // through without declaring a type.
-func (r *AuthFlowRegistry) RegisterSite(kind string, fn func(context.Context, capkit.Credentials) (capkit.Identity, error)) error {
+func (r *AuthFlowRegistry) RegisterSite(kind string, fn func(context.Context, core.Credentials) (core.Identity, error)) error {
 	if fn == nil {
 		return fmt.Errorf("登录函数不能为空")
 	}
-	return r.Register(capkit.AuthFlowFunc{KindName: kind, Fn: fn})
+	return r.Register(core.AuthFlowFunc{KindName: kind, Fn: fn})
 }
 
 // RegisterFormSite registers a cookie-jar form login for one site in one line.
@@ -93,7 +93,7 @@ func (r *AuthFlowRegistry) RegisterFormSite(flow FormFlow) error {
 }
 
 // Lookup returns the flow registered for kind.
-func (r *AuthFlowRegistry) Lookup(kind string) (capkit.AuthFlow, bool) {
+func (r *AuthFlowRegistry) Lookup(kind string) (core.AuthFlow, bool) {
 	k, err := NormalizeAuthKind(kind)
 	if err != nil {
 		return nil, false

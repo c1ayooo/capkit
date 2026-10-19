@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 
 	cam "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam/v20190116"
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
@@ -28,7 +28,7 @@ import (
 // (TC3-HMAC-SHA256) is entirely the SDK's: this file only wires the caller's
 // credential, the injected HTTP transport and the response mapping.
 //
-// Every request is forced through p.h (a capkit.HTTPDoer adapter acting as an
+// Every request is forced through p.h (a core.HTTPDoer adapter acting as an
 // http.RoundTripper), so the host's scope check, rate limit and audit still see
 // the call. No request is ever handed to the SDK's own client/transport.
 type tencentProvider struct{ h *httpDoerClient }
@@ -69,7 +69,7 @@ const (
 // leave the process, so the tool reports unavailable instead of dialing out.
 func (p *tencentProvider) tencentAvailable() error {
 	if p == nil || p.h == nil || p.h.doer == nil {
-		return capkit.Unavailable("cloudkit: HTTPDoer 未注入，无法发起云 API 调用")
+		return core.Unavailable("cloudkit: HTTPDoer 未注入，无法发起云 API 调用")
 	}
 	return nil
 }
@@ -801,7 +801,7 @@ var tencentFallback = []matchRule{
 	{"deadline exceeded", ReasonTimeout},
 }
 
-// classifyTencent turns an SDK error into a normalized error. A *capkit.Error
+// classifyTencent turns an SDK error into a normalized error. A *core.Error
 // raised by the host's own gates (scope denial, rate limit, timeout, unavailable)
 // passes through verbatim: re-classifying it as a vendor failure would hide the
 // gate's code from the agent.

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type httpFetcher struct{}
 
-func (httpFetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (httpFetcher) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
 	body := bytes.NewReader(req.Body)
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, body)
 	if err != nil {
@@ -35,7 +35,7 @@ func (httpFetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Respo
 	if err != nil {
 		return nil, err
 	}
-	return &capkit.Response{Status: resp.StatusCode, Headers: resp.Header, Body: data, Duration: time.Since(started)}, nil
+	return &core.Response{Status: resp.StatusCode, Headers: resp.Header, Body: data, Duration: time.Since(started)}, nil
 }
 
 // testClient 构造指向 httptest 上游的客户端(provider 请求全部打桩)。
@@ -43,7 +43,7 @@ func testClient(t *testing.T, handler http.Handler) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	c := NewClient(capkit.Deps{Fetcher: httpFetcher{}})
+	c := NewClient(core.Deps{Fetcher: httpFetcher{}})
 	c.KeyResolver = func(string) string { return "test-key" }
 	c.BaseURLResolver = func(string) string { return srv.URL }
 	return c
@@ -160,7 +160,7 @@ func TestHunterSearchAndNormalize(t *testing.T) {
 
 // TestUnconfiguredKey 未配置 key:明确报错(fail-loud),不静默空结果。
 func TestUnconfiguredKey(t *testing.T) {
-	c := NewClient(capkit.Deps{Fetcher: httpFetcher{}}) // KeyResolver nil
+	c := NewClient(core.Deps{Fetcher: httpFetcher{}}) // KeyResolver nil
 	_, _, _, err := c.SearchEngineAssets(context.Background(), "fofa", "x", 0, 0)
 	if err == nil || !strings.Contains(err.Error(), "未配置") {
 		t.Fatalf("未配置 key 应报错: %v", err)
@@ -222,7 +222,7 @@ func TestCapabilitySpaceSearchUsesEngine(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	c := NewClient(capkit.Deps{Fetcher: httpFetcher{}})
+	c := NewClient(core.Deps{Fetcher: httpFetcher{}})
 	c.KeyResolver = func(string) string { return "test-key" }
 	c.BaseURLResolver = func(provider string) string {
 		if provider == "hunter" {
@@ -230,7 +230,7 @@ func TestCapabilitySpaceSearchUsesEngine(t *testing.T) {
 		}
 		return srv.URL
 	}
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "space_search",
 		Input: json.RawMessage(`{"engine":"hunter","query":"domain.suffix=\"example.com\""}`),
 	})
@@ -240,7 +240,7 @@ func TestCapabilitySpaceSearchUsesEngine(t *testing.T) {
 	if gotPath != "/openApi/search" {
 		t.Fatalf("engine not honored, path=%q", gotPath)
 	}
-	providers, err := c.Call(context.Background(), capkit.Call{Tool: "space_providers"})
+	providers, err := c.Call(context.Background(), core.Call{Tool: "space_providers"})
 	if err != nil || !providers.OK {
 		t.Fatalf("providers = %#v, err=%v", providers, err)
 	}
@@ -318,14 +318,14 @@ func fofaRowClient(t *testing.T) *Client {
 // TestSpaceSearchSummary 成功路径 Summary:引擎 + 查询 + 资产条数,Meta 完整。
 func TestSpaceSearchSummary(t *testing.T) {
 	c := fofaRowClient(t)
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "space_search",
 		Input: json.RawMessage(`{"engine":"fofa","query":"domain=\"example.com\""}`),
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if res.Status != capkit.StatusSuccess || !res.OK {
+	if res.Status != core.StatusSuccess || !res.OK {
 		t.Fatalf("status=%s ok=%v", res.Status, res.OK)
 	}
 	if res.Meta.Tool != "space_search" || res.Meta.Version != kitVersion {
@@ -340,14 +340,14 @@ func TestSpaceSearchSummary(t *testing.T) {
 // TestSpaceDomainSearchSummary 域名查询 Summary 必须点名域名与条数。
 func TestSpaceDomainSearchSummary(t *testing.T) {
 	c := fofaRowClient(t)
-	res, err := c.Call(context.Background(), capkit.Call{
+	res, err := c.Call(context.Background(), core.Call{
 		Tool:  "space_domain_search",
 		Input: json.RawMessage(`{"engine":"fofa","domain":"example.com"}`),
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if res.Status != capkit.StatusSuccess || res.Meta.Tool != "space_domain_search" {
+	if res.Status != core.StatusSuccess || res.Meta.Tool != "space_domain_search" {
 		t.Fatalf("status=%s meta=%+v", res.Status, res.Meta)
 	}
 	want := "用 FOFA 查询域名 example.com 的资产，返回 1 条"
@@ -358,18 +358,18 @@ func TestSpaceDomainSearchSummary(t *testing.T) {
 
 // TestSpaceProvidersSummary providers 的 Summary 汇总引擎数与已配置密钥数。
 func TestSpaceProvidersSummary(t *testing.T) {
-	c := NewClient(capkit.Deps{Fetcher: httpFetcher{}})
+	c := NewClient(core.Deps{Fetcher: httpFetcher{}})
 	c.KeyResolver = func(provider string) string {
 		if provider == "fofa" {
 			return "test-key"
 		}
 		return ""
 	}
-	res, err := c.Call(context.Background(), capkit.Call{Tool: "space_providers"})
+	res, err := c.Call(context.Background(), core.Call{Tool: "space_providers"})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if res.Status != capkit.StatusSuccess || res.Meta.Tool != "space_providers" {
+	if res.Status != core.StatusSuccess || res.Meta.Tool != "space_providers" {
 		t.Fatalf("status=%s meta=%+v", res.Status, res.Meta)
 	}
 	want := "返回 5 个测绘引擎，其中 1 个密钥已配置"
@@ -391,10 +391,10 @@ func TestSpaceSearchFailures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewClient(capkit.Deps{Fetcher: httpFetcher{}})
+			c := NewClient(core.Deps{Fetcher: httpFetcher{}})
 			c.KeyResolver = func(string) string { return "test-key" }
-			res, _ := c.Call(context.Background(), capkit.Call{Tool: tc.tool, Input: json.RawMessage(tc.input)})
-			if res.Status != capkit.StatusFailed || res.OK {
+			res, _ := c.Call(context.Background(), core.Call{Tool: tc.tool, Input: json.RawMessage(tc.input)})
+			if res.Status != core.StatusFailed || res.OK {
 				t.Fatalf("status=%s ok=%v", res.Status, res.OK)
 			}
 			if res.Error == nil || res.Error.Code == "" {
@@ -412,12 +412,12 @@ func TestSpaceSearchFailures(t *testing.T) {
 
 // TestUnconfiguredKeyEnvelope 未配置 key 是失败信封(而非静默空结果),且带 Summary。
 func TestUnconfiguredKeyEnvelope(t *testing.T) {
-	c := NewClient(capkit.Deps{Fetcher: httpFetcher{}})
-	res, _ := c.Call(context.Background(), capkit.Call{
+	c := NewClient(core.Deps{Fetcher: httpFetcher{}})
+	res, _ := c.Call(context.Background(), core.Call{
 		Tool:  "space_search",
 		Input: json.RawMessage(`{"engine":"fofa","query":"domain=\"example.com\""}`),
 	})
-	if res.Status != capkit.StatusFailed || res.Error == nil {
+	if res.Status != core.StatusFailed || res.Error == nil {
 		t.Fatalf("未配置 key 应为失败信封: %+v", res)
 	}
 	if !strings.Contains(res.Summary, "未配置") {

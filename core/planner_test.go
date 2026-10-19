@@ -1,21 +1,21 @@
-package capkit_test
+package core_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-func confirmed(kind string) capkit.Finding {
-	return capkit.Finding{Kind: kind, Confirmed: true}
+func confirmed(kind string) core.Finding {
+	return core.Finding{Kind: kind, Confirmed: true}
 }
 
 // TestDefaultPlannerOnlyAdvisesConfirmed locks the fail-closed rule: an
 // unconfirmed finding yields no suggestion, so an agent never acts on a guess.
 func TestDefaultPlannerOnlyAdvisesConfirmed(t *testing.T) {
-	p := capkit.DefaultPlanner()
-	steps, err := p.Suggest(context.Background(), capkit.Finding{Kind: "cmdi", Confirmed: false})
+	p := core.DefaultPlanner()
+	steps, err := p.Suggest(context.Background(), core.Finding{Kind: "cmdi", Confirmed: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestDefaultPlannerOnlyAdvisesConfirmed(t *testing.T) {
 }
 
 func TestDefaultPlannerCoversKnownKinds(t *testing.T) {
-	p := capkit.DefaultPlanner()
+	p := core.DefaultPlanner()
 	for _, kind := range []string{"cmdi", "sqli", "lfi", "ssrf", "upload", "deser"} {
 		steps, err := p.Suggest(context.Background(), confirmed(kind))
 		if err != nil {
@@ -62,13 +62,13 @@ func TestDefaultPlannerCoversKnownKinds(t *testing.T) {
 }
 
 func TestChainPlannerDedupesByToolAndPreservesPriority(t *testing.T) {
-	first := capkit.PlannerFunc(func(context.Context, capkit.Finding) ([]capkit.NextStep, error) {
-		return []capkit.NextStep{{Tool: "a"}, {Tool: "b"}}, nil
+	first := core.PlannerFunc(func(context.Context, core.Finding) ([]core.NextStep, error) {
+		return []core.NextStep{{Tool: "a"}, {Tool: "b"}}, nil
 	})
-	second := capkit.PlannerFunc(func(context.Context, capkit.Finding) ([]capkit.NextStep, error) {
-		return []capkit.NextStep{{Tool: "b"}, {Tool: "c"}}, nil
+	second := core.PlannerFunc(func(context.Context, core.Finding) ([]core.NextStep, error) {
+		return []core.NextStep{{Tool: "b"}, {Tool: "c"}}, nil
 	})
-	chain := &capkit.ChainPlanner{}
+	chain := &core.ChainPlanner{}
 	chain.Add(first)
 	chain.Add(nil) // nil is ignored
 	chain.Add(second)
@@ -92,10 +92,10 @@ func TestChainPlannerDedupesByToolAndPreservesPriority(t *testing.T) {
 }
 
 func TestChainPlannerPropagatesError(t *testing.T) {
-	boom := capkit.PlannerFunc(func(context.Context, capkit.Finding) ([]capkit.NextStep, error) {
+	boom := core.PlannerFunc(func(context.Context, core.Finding) ([]core.NextStep, error) {
 		return nil, context.Canceled
 	})
-	chain := &capkit.ChainPlanner{}
+	chain := &core.ChainPlanner{}
 	chain.Add(boom)
 	if _, err := chain.Suggest(context.Background(), confirmed("x")); err == nil {
 		t.Fatal("expected the planner error to propagate")
@@ -103,9 +103,9 @@ func TestChainPlannerPropagatesError(t *testing.T) {
 }
 
 func TestDedupeNext(t *testing.T) {
-	got := capkit.DedupeNext(
-		[]capkit.NextStep{{Tool: "a"}, {Tool: ""}, {Tool: "b"}},
-		[]capkit.NextStep{{Tool: "b"}, {Tool: "c"}},
+	got := core.DedupeNext(
+		[]core.NextStep{{Tool: "a"}, {Tool: ""}, {Tool: "b"}},
+		[]core.NextStep{{Tool: "b"}, {Tool: "c"}},
 	)
 	if len(got) != 3 {
 		t.Fatalf("deduped to %d, want 3: %+v", len(got), got)
@@ -116,12 +116,12 @@ func TestDedupeNext(t *testing.T) {
 }
 
 func TestSortByRisk(t *testing.T) {
-	in := []capkit.NextStep{
-		{Tool: "low", Risk: capkit.RiskLow},
-		{Tool: "high", Risk: capkit.RiskHigh},
-		{Tool: "med", Risk: capkit.RiskMedium},
+	in := []core.NextStep{
+		{Tool: "low", Risk: core.RiskLow},
+		{Tool: "high", Risk: core.RiskHigh},
+		{Tool: "med", Risk: core.RiskMedium},
 	}
-	out := capkit.SortByRisk(in)
+	out := core.SortByRisk(in)
 	if out[0].Tool != "high" || out[1].Tool != "med" || out[2].Tool != "low" {
 		t.Fatalf("order = %v", []string{out[0].Tool, out[1].Tool, out[2].Tool})
 	}

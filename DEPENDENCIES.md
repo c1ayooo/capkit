@@ -17,11 +17,11 @@ boundary**: a kit must stay host-independent.
    - another top-level kit (same-kit subpackages are allowed)
    - any host module (`github.com/c1ayooo/4zrec/...` or another platform)
 4. Host services are reached through ports, never directly:
-   - HTTP: `capkit.HTTPDoer` / `capkit.Fetcher` (no kit-owned `http.Client` to
+   - HTTP: `core.HTTPDoer` / `core.Fetcher` (no kit-owned `http.Client` to
      a project target)
-   - subprocess: `capkit.ProcessRunner`
+   - subprocess: `core.ProcessRunner`
    - storage: a host Store adapter
-   - logging: `capkit.Logger`
+   - logging: `core.Logger`
 
    The `sessionkit` transports obey this rule too: WinRM rides `HTTPDoer` (its
    WSMan calls are ordinary scoped HTTP requests), while SMB and the local CLI
@@ -45,7 +45,7 @@ go test ./...
 and if any transitive import resolves to a copyleft (GPL/AGPL/SSPL) module root
 listed in `scripts/copyleft.txt` (docs §8: "无 GPL/AGPL 代码被 import"). Those
 tools are reached by invoking the binary as a subprocess through
-`capkit.ProcessRunner`, never by importing their source.
+`core.ProcessRunner`, never by importing their source.
 
 ## Single module
 

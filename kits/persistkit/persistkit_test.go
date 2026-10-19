@@ -6,24 +6,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-// fakeSession is a scripted capkit.Session. Exec matches a substring of the
+// fakeSession is a scripted core.Session. Exec matches a substring of the
 // command and returns the canned output; unmatched commands return exit 0 with
 // empty output (read-only enumeration tolerates that).
 type fakeSession struct {
 	os  string
-	out map[string]capkit.Output
+	out map[string]core.Output
 	// calls records every command executed, in order.
 	calls []string
 	fail  bool
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	f.calls = append(f.calls, cmd)
 	if f.fail {
-		return capkit.Output{}, context.DeadlineExceeded
+		return core.Output{}, context.DeadlineExceeded
 	}
 	for k, v := range f.out {
 		if strings.Contains(cmd, k) {
@@ -31,44 +31,44 @@ func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (ca
 			return v, nil
 		}
 	}
-	return capkit.Output{Command: cmd, ExitCode: 0}, nil
+	return core.Output{Command: cmd, ExitCode: 0}, nil
 }
 
-func (f *fakeSession) Info() capkit.SessionInfo {
-	return capkit.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.5"}
+func (f *fakeSession) Info() core.SessionInfo {
+	return core.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.5"}
 }
 func (f *fakeSession) Close() error { return nil }
 
-// fakeManager satisfies capkit.SessionManager.
+// fakeManager satisfies core.SessionManager.
 type fakeManager struct {
-	sess capkit.Session
+	sess core.Session
 }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, nil
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, nil
 }
-func (m *fakeManager) Get(id string) (capkit.Session, bool) {
+func (m *fakeManager) Get(id string) (core.Session, bool) {
 	if m.sess == nil {
 		return nil, false
 	}
 	return m.sess, true
 }
-func (m *fakeManager) List() []capkit.SessionInfo { return nil }
-func (m *fakeManager) Close(string) error         { return nil }
+func (m *fakeManager) List() []core.SessionInfo { return nil }
+func (m *fakeManager) Close(string) error       { return nil }
 
-func newCap(t *testing.T, s capkit.Session) *Capability {
+func newCap(t *testing.T, s core.Session) *Capability {
 	t.Helper()
-	c, err := NewCapability(capkit.Deps{Sessions: &fakeManager{sess: s}})
+	c, err := NewCapability(core.Deps{Sessions: &fakeManager{sess: s}})
 	if err != nil {
 		t.Fatalf("NewCapability: %v", err)
 	}
 	return c.(*Capability)
 }
 
-func call(t *testing.T, c *Capability, tool string, in any) capkit.Result {
+func call(t *testing.T, c *Capability, tool string, in any) core.Result {
 	t.Helper()
 	raw, _ := json.Marshal(in)
-	res, err := c.Call(context.Background(), capkit.Call{Tool: tool, Input: raw})
+	res, err := c.Call(context.Background(), core.Call{Tool: tool, Input: raw})
 	if err != nil {
 		t.Fatalf("%s: unexpected transport error: %v", tool, err)
 	}
@@ -103,29 +103,29 @@ func TestManifestSchemas(t *testing.T) {
 func TestUnknownTool(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "persist_bogus", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("got status=%s err=%+v", res.Status, res.Error)
 	}
 }
 
 func TestMissingManagerFailsClosed(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{})
-	res, _ := c.(*Capability).Call(context.Background(), capkit.Call{Tool: "persist_enum", Input: json.RawMessage(`{"session_id":"x"}`)})
-	if res.Status != capkit.StatusUnavailable || res.Error.Code != capkit.CodeToolMissing {
+	c, _ := NewCapability(core.Deps{})
+	res, _ := c.(*Capability).Call(context.Background(), core.Call{Tool: "persist_enum", Input: json.RawMessage(`{"session_id":"x"}`)})
+	if res.Status != core.StatusUnavailable || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("got status=%s err=%+v", res.Status, res.Error)
 	}
 }
 
 func TestSessionNotFound(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{Sessions: &fakeManager{}})
-	res, _ := c.(*Capability).Call(context.Background(), capkit.Call{Tool: "persist_enum", Input: json.RawMessage(`{"session_id":"missing"}`)})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	c, _ := NewCapability(core.Deps{Sessions: &fakeManager{}})
+	res, _ := c.(*Capability).Call(context.Background(), core.Call{Tool: "persist_enum", Input: json.RawMessage(`{"session_id":"missing"}`)})
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("got %+v", res.Error)
 	}
 }
 
 func TestEnumLinux(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{
 		"crontab":                {Stdout: "* * * * * root /tmp/x\n"},
 		"ls -la /etc/cron.d/":    {Stdout: "-rw-r--r-- 1 root root 20 cron.d\n"},
 		"systemctl list-unit":    {Stdout: "sshd.service enabled\n"},
@@ -135,7 +135,7 @@ func TestEnumLinux(t *testing.T) {
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "persist_enum", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s summary=%s", res.Status, res.Summary)
 	}
 	var data struct {
@@ -158,14 +158,14 @@ func TestEnumLinux(t *testing.T) {
 }
 
 func TestEnumWindowsSignals(t *testing.T) {
-	sess := &fakeSession{os: "windows", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "windows", out: map[string]core.Output{
 		"schtasks":   {Stdout: "TaskName: \\CapKitUpdate\nTaskName: \\Microsoft\\Foo\n"},
 		"run_hkcu":   {Stdout: "    Updater    REG_SZ    C:\\x.exe\n"},
 		"wmi_events": {Stdout: "Name\nFoo\n"},
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "persist_enum", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s", res.Status)
 	}
 	var data struct {
@@ -184,7 +184,7 @@ func TestEnumWindowsSignals(t *testing.T) {
 func TestEnumPartialWhenTransportFails(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux", fail: true})
 	res := call(t, c, "persist_enum", map[string]any{"session_id": "s1"})
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("status=%s (want partial)", res.Status)
 	}
 }
@@ -195,7 +195,7 @@ func TestPlanLinuxCron(t *testing.T) {
 		"session_id": "s1", "technique": "linux-cron", "payload": "/tmp/implant",
 		"name": "updater", "schedule": "*/5 * * * *",
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	var pl Plan
@@ -242,7 +242,7 @@ func TestPlanAllTechniques(t *testing.T) {
 				in[k] = v
 			}
 			res := call(t, c, "persist_plan", in)
-			if res.Status != capkit.StatusSuccess {
+			if res.Status != core.StatusSuccess {
 				t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 			}
 			var pl Plan
@@ -260,27 +260,27 @@ func TestPlanValidation(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	// unknown technique
 	res := call(t, c, "persist_plan", map[string]any{"session_id": "s1", "technique": "nope"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("unknown technique: %+v", res.Error)
 	}
 	// payload required
 	res = call(t, c, "persist_plan", map[string]any{"session_id": "s1", "technique": "linux-cron"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("missing payload: %+v", res.Error)
 	}
 	// ssh-key needs public_key
 	res = call(t, c, "persist_plan", map[string]any{"session_id": "s1", "technique": "linux-ssh-key"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("missing public_key: %+v", res.Error)
 	}
 	// platform mismatch
 	res = call(t, c, "persist_plan", map[string]any{"session_id": "s1", "technique": "windows-service", "payload": "x", "platform": "linux"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("platform mismatch: %+v", res.Error)
 	}
 	// newline injection in name
 	res = call(t, c, "persist_plan", map[string]any{"session_id": "s1", "technique": "linux-cron", "payload": "x", "name": "a\nb"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("newline name: %+v", res.Error)
 	}
 }
@@ -288,7 +288,7 @@ func TestPlanValidation(t *testing.T) {
 func TestApplyRequiresConfirm(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "persist_apply", map[string]any{"session_id": "s1", "technique": "linux-cron", "payload": "/tmp/p", "confirm": false})
-	if res.Status != capkit.StatusNeedHuman || res.Error.Code != capkit.CodeNeedHuman {
+	if res.Status != core.StatusNeedHuman || res.Error.Code != core.CodeNeedHuman {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 }
@@ -299,7 +299,7 @@ func TestApplyRunsSteps(t *testing.T) {
 	res := call(t, c, "persist_apply", map[string]any{
 		"session_id": "s1", "technique": "linux-systemd", "payload": "/tmp/p", "name": "svc", "confirm": true,
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	if len(sess.calls) == 0 {
@@ -311,14 +311,14 @@ func TestApplyRunsSteps(t *testing.T) {
 }
 
 func TestApplyPartialOnStepFailure(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{
 		"systemctl": {ExitCode: 1, Stderr: "not found"},
 	}}
 	c := newCap(t, sess)
 	res := call(t, c, "persist_apply", map[string]any{
 		"session_id": "s1", "technique": "linux-systemd", "payload": "/tmp/p", "confirm": true,
 	})
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("status=%s (want partial)", res.Status)
 	}
 }
@@ -338,7 +338,7 @@ func TestDefaultNameSanitized(t *testing.T) {
 }
 
 func TestDetectPlatformProbe(t *testing.T) {
-	sess := &fakeSession{os: "", out: map[string]capkit.Output{"uname -s": {Stdout: "Linux\n"}}}
+	sess := &fakeSession{os: "", out: map[string]core.Output{"uname -s": {Stdout: "Linux\n"}}}
 	c := newCap(t, sess)
 	if got := detectPlatform(context.Background(), c, sess, 0); got != "linux" {
 		t.Fatalf("detectPlatform = %q", got)

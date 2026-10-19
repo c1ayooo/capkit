@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // TestIdempotencyKeyIncludesTool is a regression guard: the key must fold in
@@ -12,7 +12,7 @@ import (
 // (a bare {"session_id":"x"} is enough) collide and return each other's cached
 // result.
 func TestIdempotencyKeyIncludesTool(t *testing.T) {
-	cc := capkit.CallContext{ProjectID: 1, Actor: "a", TaskID: "t"}
+	cc := core.CallContext{ProjectID: 1, Actor: "a", TaskID: "t"}
 	in := json.RawMessage(`{"session_id":"x"}`)
 
 	k1 := idempotencyKey("session_list", cc, in)

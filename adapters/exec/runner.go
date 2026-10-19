@@ -8,20 +8,20 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Runner is the gate-aware ProcessRunner injected into kits. It re-checks
 // scope and rate limits for the targets a subprocess is about to touch.
 type Runner struct {
-	Scope   capkit.ScopeChecker
-	Limiter capkit.Limiter
-	Audit   capkit.AuditSink
+	Scope   core.ScopeChecker
+	Limiter core.Limiter
+	Audit   core.AuditSink
 	// ExtraEnv is appended after os.Environ(). Hosts can inject proxy vars.
 	ExtraEnv []string
 }
 
-func New(scope capkit.ScopeChecker, limiter capkit.Limiter, audit capkit.AuditSink) *Runner {
+func New(scope core.ScopeChecker, limiter core.Limiter, audit core.AuditSink) *Runner {
 	return &Runner{Scope: scope, Limiter: limiter, Audit: audit}
 }
 
@@ -29,15 +29,15 @@ func New(scope capkit.ScopeChecker, limiter capkit.Limiter, audit capkit.AuditSi
 // targets (a CLI session's shell, for example). Scope enforcement is skipped
 // because there is no target to check; audit still records the invocation when
 // an audit sink is supplied.
-func NewLocal(audit capkit.AuditSink) *Runner {
+func NewLocal(audit core.AuditSink) *Runner {
 	return &Runner{Audit: audit}
 }
 
-func (r *Runner) Run(ctx context.Context, spec capkit.ProcessSpec) (*capkit.ProcessResult, error) {
+func (r *Runner) Run(ctx context.Context, spec core.ProcessSpec) (*core.ProcessResult, error) {
 	if spec.Path == "" {
-		return nil, capkit.InvalidInput("process path is required")
+		return nil, core.InvalidInput("process path is required")
 	}
-	cc, _ := capkit.CallContextFrom(ctx)
+	cc, _ := core.CallContextFrom(ctx)
 
 	var releases []func()
 	defer func() {
@@ -50,7 +50,7 @@ func (r *Runner) Run(ctx context.Context, spec capkit.ProcessSpec) (*capkit.Proc
 			target.ProjectID = cc.ProjectID
 		}
 		if r.Scope == nil {
-			return nil, capkit.ScopeDenied("scope checker is not configured")
+			return nil, core.ScopeDenied("scope checker is not configured")
 		}
 		if err := r.Scope.Check(ctx, target); err != nil {
 			return nil, err
@@ -94,14 +94,14 @@ func (r *Runner) Run(ctx context.Context, spec capkit.ProcessSpec) (*capkit.Proc
 			exitCode = exitErr.ExitCode()
 		} else {
 			if r.Audit != nil {
-				r.Audit.Record(ctx, capkit.AuditEvent{
+				r.Audit.Record(ctx, core.AuditEvent{
 					TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
-					Capability: "process", Tool: "exec", Risk: capkit.RiskMedium, Targets: spec.Targets,
+					Capability: "process", Tool: "exec", Risk: core.RiskMedium, Targets: spec.Targets,
 					Phase: "process", Status: "error", Error: err.Error(),
 					DurationMS: duration.Milliseconds(), StartedAt: started, FinishedAt: time.Now(),
 				})
 			}
-			return nil, capkit.Unavailable(err.Error())
+			return nil, core.Unavailable(err.Error())
 		}
 	}
 	if r.Audit != nil {
@@ -111,14 +111,14 @@ func (r *Runner) Run(ctx context.Context, spec capkit.ProcessSpec) (*capkit.Proc
 			status = "error"
 			errMsg = "exit code " + itoa(exitCode)
 		}
-		r.Audit.Record(ctx, capkit.AuditEvent{
+		r.Audit.Record(ctx, core.AuditEvent{
 			TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
-			Capability: "process", Tool: "exec", Risk: capkit.RiskMedium, Targets: spec.Targets,
+			Capability: "process", Tool: "exec", Risk: core.RiskMedium, Targets: spec.Targets,
 			Phase: "process", Status: status, Error: errMsg,
 			DurationMS: duration.Milliseconds(), StartedAt: started, FinishedAt: time.Now(),
 		})
 	}
-	return &capkit.ProcessResult{ExitCode: exitCode, Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, nil
+	return &core.ProcessResult{ExitCode: exitCode, Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, nil
 }
 
 func itoa(n int) string {

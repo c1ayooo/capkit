@@ -11,7 +11,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 )
 
@@ -36,7 +36,7 @@ func newAWSFakeProvider(fake *harness.HTTP) *awsProvider {
 }
 
 // awsRequestFor finds the single recorded request whose URL contains fragment.
-func awsRequestFor(t *testing.T, fake *harness.HTTP, fragment string) capkit.Request {
+func awsRequestFor(t *testing.T, fake *harness.HTTP, fragment string) core.Request {
 	t.Helper()
 	for _, r := range fake.Requests() {
 		if strings.Contains(r.URL, fragment) {
@@ -48,7 +48,7 @@ func awsRequestFor(t *testing.T, fake *harness.HTTP, fragment string) capkit.Req
 		urls = append(urls, r.URL)
 	}
 	t.Fatalf("no recorded request URL contained %q; calls=%v", fragment, urls)
-	return capkit.Request{}
+	return core.Request{}
 }
 
 // assertAWSSignedViaDoer proves the request went through the injected doer and
@@ -935,8 +935,8 @@ func TestAWSClampMax(t *testing.T) {
 	if got := clampMax(25); got != 25 {
 		t.Errorf("clampMax(25) = %d", got)
 	}
-	if got := clampMax(capkit.MaxListItems + 1); got != capkit.MaxListItems {
-		t.Errorf("clampMax over the cap = %d, want %d", got, capkit.MaxListItems)
+	if got := clampMax(core.MaxListItems + 1); got != core.MaxListItems {
+		t.Errorf("clampMax over the cap = %d, want %d", got, core.MaxListItems)
 	}
 }
 

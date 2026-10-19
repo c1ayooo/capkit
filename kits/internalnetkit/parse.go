@@ -85,7 +85,7 @@ type Adapter struct {
 	DHCP        bool     `json:"dhcp,omitempty"`
 }
 
-// ---- bounded list helper (Data is further clamped by capkit.ClampData) ----
+// ---- bounded list helper (Data is further clamped by core.ClampData) ----
 
 const parseListCap = 512
 

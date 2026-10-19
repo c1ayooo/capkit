@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // CheckResult is the raw outcome of one EscapeCheck command.
@@ -59,16 +59,16 @@ func (s EscapeSurface) HitCount() int {
 	return n
 }
 
-func (c *Capability) manager() (capkit.SessionManager, *capkit.Error) {
+func (c *Capability) manager() (core.SessionManager, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	return c.deps.Sessions, nil
 }
 
 // --- container_escape_check ---
 
-func (c *Capability) escapeCheck(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) escapeCheck(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in struct {
 		SessionID string `json:"session_id"`
@@ -76,18 +76,18 @@ func (c *Capability) escapeCheck(ctx context.Context, call capkit.Call) (capkit.
 		MaxOutput int    `json:"max_output"`
 	}
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	if strings.TrimSpace(in.SessionID) == "" {
-		return capkit.FailResult(capkit.InvalidInput("session_id 必填")), nil
+		return core.FailResult(core.InvalidInput("session_id 必填")), nil
 	}
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
 	surface := surveySession(ctx, s, in.SessionID, escapeTimeout(in.TimeoutMS), escapeMaxOutput(in.MaxOutput))
 
@@ -99,9 +99,9 @@ func (c *Capability) escapeCheck(ctx context.Context, call capkit.Call) (capkit.
 	res.Meta.Target = surface.Host
 	res.Findings = escapeFindings(surface)
 	if surface.HitCount() > 0 {
-		res.Next = []capkit.NextStep{{
+		res.Next = []core.NextStep{{
 			Tool: "container_escape_plan", Reason: "根据逃逸面生成候选技术并排序",
-			Risk: capkit.RiskHigh, Preconditions: []string{"session 可用"},
+			Risk: core.RiskHigh, Preconditions: []string{"session 可用"},
 			Params: mustJSON(map[string]any{"session_id": in.SessionID}),
 		}}
 	}
@@ -110,12 +110,12 @@ func (c *Capability) escapeCheck(ctx context.Context, call capkit.Call) (capkit.
 
 // surveySession runs the bounded EscapeChecks and folds the verdicts into a
 // surface. It is shared by container_escape_check and container_escape_plan.
-func surveySession(ctx context.Context, s capkit.Session, sessionID string, timeout time.Duration, maxOutput int) EscapeSurface {
+func surveySession(ctx context.Context, s core.Session, sessionID string, timeout time.Duration, maxOutput int) EscapeSurface {
 	info := s.Info()
 	surface := EscapeSurface{SessionID: sessionID, Host: info.Host, OS: info.OS}
 	var combined strings.Builder
 	for _, check := range EscapeChecks {
-		out, err := s.Exec(ctx, check.Command, capkit.ExecOpts{Timeout: timeout, MaxOutput: maxOutput})
+		out, err := s.Exec(ctx, check.Command, core.ExecOpts{Timeout: timeout, MaxOutput: maxOutput})
 		cr := CheckResult{ID: check.ID, Path: check.Path, Command: check.Command}
 		if err != nil {
 			cr.Error = err.Error()
@@ -161,9 +161,9 @@ var escapeFindingKind = map[string]string{
 	"proc_sys_writable":             "container_proc_sys_writable",
 }
 
-func escapeFindings(surface EscapeSurface) []capkit.Finding {
+func escapeFindings(surface EscapeSurface) []core.Finding {
 	target := sessionTarget(surface.Host)
-	var out []capkit.Finding
+	var out []core.Finding
 	for _, f := range surface.Checks {
 		if !f.Hit {
 			continue
@@ -172,7 +172,7 @@ func escapeFindings(surface EscapeSurface) []capkit.Finding {
 		if kind == "" {
 			kind = "container_" + f.ID
 		}
-		out = append(out, capkit.Finding{
+		out = append(out, core.Finding{
 			Target: target, Kind: kind,
 			Fingerprint: fingerprint(kind, surface.Host, ""),
 			Confirmed:   true, Source: "containerkit",
@@ -182,19 +182,19 @@ func escapeFindings(surface EscapeSurface) []capkit.Finding {
 	return out
 }
 
-func sessionTarget(host string) capkit.Target {
+func sessionTarget(host string) core.Target {
 	if host == "" {
-		return capkit.Target{Kind: capkit.TargetHost}
+		return core.Target{Kind: core.TargetHost}
 	}
-	if t, err := capkit.TargetFromString(0, host); err == nil {
+	if t, err := core.TargetFromString(0, host); err == nil {
 		return t
 	}
-	return capkit.Target{Kind: capkit.TargetHost, Host: strings.ToLower(host)}
+	return core.Target{Kind: core.TargetHost, Host: strings.ToLower(host)}
 }
 
 // --- container_escape_plan ---
 
-func (c *Capability) escapePlan(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) escapePlan(ctx context.Context, call core.Call) (core.Result, error) {
 	start := time.Now()
 	var in struct {
 		SessionID string         `json:"session_id"`
@@ -202,7 +202,7 @@ func (c *Capability) escapePlan(ctx context.Context, call capkit.Call) (capkit.R
 		TimeoutMS int            `json:"timeout_ms"`
 	}
 	if e := decodeJSON(call.Input, &in); e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 
 	var surface EscapeSurface
@@ -215,15 +215,15 @@ func (c *Capability) escapePlan(ctx context.Context, call capkit.Call) (capkit.R
 	case strings.TrimSpace(in.SessionID) != "":
 		mgr, e := c.manager()
 		if e != nil {
-			return capkit.FailResult(e), nil
+			return core.FailResult(e), nil
 		}
 		s, ok := mgr.Get(in.SessionID)
 		if !ok {
-			return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+			return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 		}
 		surface = surveySession(ctx, s, in.SessionID, escapeTimeout(in.TimeoutMS), escapeMaxOutput(0))
 	default:
-		return capkit.FailResult(capkit.InvalidInput("需要 surface 或 session_id")), nil
+		return core.FailResult(core.InvalidInput("需要 surface 或 session_id")), nil
 	}
 
 	techniques := planTechniques(surface)
@@ -241,51 +241,51 @@ func (c *Capability) escapePlan(ctx context.Context, call capkit.Call) (capkit.R
 
 // planTechniques ranks candidate escapes for a surface. It returns data only:
 // nothing here executes an escape. Order is the ranking.
-func planTechniques(s EscapeSurface) []capkit.NextStep {
-	var out []capkit.NextStep
-	add := func(tool, reason string, risk capkit.Risk, pre ...string) {
-		out = append(out, capkit.NextStep{Tool: tool, Reason: reason, Risk: risk, Preconditions: pre})
+func planTechniques(s EscapeSurface) []core.NextStep {
+	var out []core.NextStep
+	add := func(tool, reason string, risk core.Risk, pre ...string) {
+		out = append(out, core.NextStep{Tool: tool, Reason: reason, Risk: risk, Preconditions: pre})
 	}
 
 	if s.DockerSock || s.DockerSockMounted {
 		add("docker_run_privileged",
 			"docker.sock 可访问：创建 privileged 容器并把宿主 / 以 bind mount 挂入，直接在宿主文件系统读写",
-			capkit.RiskHigh, "session 可写 docker.sock", "宿主/可达的 docker daemon 可用")
+			core.RiskHigh, "session 可写 docker.sock", "宿主/可达的 docker daemon 可用")
 	}
 	if s.Privileged || s.ReleaseAgentWritable {
 		add("cgroup_release_agent",
 			"privileged 或 release_agent 可写（cgroup v1）：向 release_agent 写入脚本并触发 cgroup 释放，在宿主以 root 执行",
-			capkit.RiskHigh, "CAP_SYS_ADMIN", "cgroup v1 且可写 release_agent")
+			core.RiskHigh, "CAP_SYS_ADMIN", "cgroup v1 且可写 release_agent")
 	}
 	if s.Privileged || s.CorePatternWritable {
 		add("core_pattern",
 			"privileged 或 core_pattern 可写：改写 /proc/sys/kernel/core_pattern 指向恶意程序，触发进程崩溃后在宿主执行",
-			capkit.RiskHigh, "core_pattern 可写或 privileged")
+			core.RiskHigh, "core_pattern 可写或 privileged")
 	}
 	if s.CapSysAdmin {
 		add("mount_host_root",
 			"拥有 CAP_SYS_ADMIN：挂载宿主块设备或宿主文件系统，读取/覆盖宿主文件",
-			capkit.RiskHigh, "CAP_SYS_ADMIN", "宿主设备或可挂载的卷可见")
+			core.RiskHigh, "CAP_SYS_ADMIN", "宿主设备或可挂载的卷可见")
 	}
 	if s.CapDacReadSearch {
 		add("open_by_handle_at",
 			"拥有 CAP_DAC_READ_SEARCH：用 open_by_handle_at 绕过权限检查读取宿主文件",
-			capkit.RiskMedium, "CAP_DAC_READ_SEARCH")
+			core.RiskMedium, "CAP_DAC_READ_SEARCH")
 	}
 	if s.HostPID && (s.Privileged || s.CapSysAdmin) {
 		add("nsenter_host",
 			"共享宿主 PID 命名空间且有 SYS_ADMIN：nsenter 进入 PID 1 的 mount/net/pid 命名空间",
-			capkit.RiskHigh, "宿主 PID namespace", "CAP_SYS_ADMIN 或 privileged")
+			core.RiskHigh, "宿主 PID namespace", "CAP_SYS_ADMIN 或 privileged")
 	}
 	if s.HostDevices {
 		add("raw_disk_access",
 			"可见宿主块设备：直接读写磁盘绕过文件系统权限",
-			capkit.RiskHigh, "设备节点可见", "对设备节点有权限")
+			core.RiskHigh, "设备节点可见", "对设备节点有权限")
 	}
 	if s.ProcSysWritable {
 		add("proc_sys_write",
 			"可写 /proc/sys：修改内核 sysctl（如 core_pattern、modprobe）扩大逃逸面",
-			capkit.RiskMedium, "对应 sysctl 文件可写")
+			core.RiskMedium, "对应 sysctl 文件可写")
 	}
 	return out
 }

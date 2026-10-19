@@ -6,19 +6,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Kit composes fingerprinting, template search and engine execution through
 // capkit interfaces only. It never imports fingerprintkit/templatekit/httpkit
 // or any concrete engine.
 type Kit struct {
-	fingerprints capkit.FingerprintProvider
-	catalog      capkit.TemplateCatalog
-	engines      map[string]capkit.TemplateEngine
+	fingerprints core.FingerprintProvider
+	catalog      core.TemplateCatalog
+	engines      map[string]core.TemplateEngine
 }
 
-func New(deps capkit.Deps) (*Kit, error) {
+func New(deps core.Deps) (*Kit, error) {
 	if deps.Fingerprints == nil {
 		return nil, fmt.Errorf("verifykit: fingerprint provider is required")
 	}
@@ -31,16 +31,16 @@ func New(deps capkit.Deps) (*Kit, error) {
 	return &Kit{fingerprints: deps.Fingerprints, catalog: deps.Templates, engines: deps.TemplateEngines}, nil
 }
 
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(deps) }
+func NewCapability(deps core.Deps) (core.Capability, error) { return New(deps) }
 
-func (k *Kit) Manifest() capkit.Manifest { return Manifest() }
+func (k *Kit) Manifest() core.Manifest { return Manifest() }
 
 // Manifest is the static declaration, usable before providers are available.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "verifykit", Version: "0.1.0", APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "fingerprints", "templates", "template_engines"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "verify_plan",
 				Description: "Fingerprint the target, then search the predefined template catalog for matching products/CVEs. Returns a plan only; it does not execute anything.",
@@ -57,19 +57,19 @@ func Manifest() capkit.Manifest {
   },
   "required":["target"]
 }`),
-				Risk:         capkit.RiskLow,
+				Risk:         core.RiskLow,
 				OutputSchema: json.RawMessage(`{"type":"object","properties":{"plan_id":{"type":"string"},"target":{"type":"object"},"fingerprints":{"type":"array","items":{"type":"object"}},"templates":{"type":"array","items":{"type":"object"}}}}`),
-				RateLimit:    capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2},
-				ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+				RateLimit:    core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2},
+				ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 					var in planInput
 					if err := json.Unmarshal(input, &in); err != nil {
 						return nil, err
 					}
-					t, err := capkit.TargetFromString(0, in.Target)
+					t, err := core.TargetFromString(0, in.Target)
 					if err != nil {
 						return nil, err
 					}
-					return []capkit.Target{t}, nil
+					return []core.Target{t}, nil
 				},
 			},
 			{
@@ -84,19 +84,19 @@ func Manifest() capkit.Manifest {
   },
   "required":["target","template_ids"]
 }`),
-				Risk:         capkit.RiskHigh,
+				Risk:         core.RiskHigh,
 				OutputSchema: json.RawMessage(`{"type":"object","properties":{"plan_id":{"type":"string"},"status":{"type":"string"},"results":{"type":"array","items":{"type":"object"}}}}`),
-				RateLimit:    capkit.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
-				ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+				RateLimit:    core.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
+				ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 					var in executeInput
 					if err := json.Unmarshal(input, &in); err != nil {
 						return nil, err
 					}
-					t, err := capkit.TargetFromString(0, in.Target)
+					t, err := core.TargetFromString(0, in.Target)
 					if err != nil {
 						return nil, err
 					}
-					return []capkit.Target{t}, nil
+					return []core.Target{t}, nil
 				},
 			},
 		},
@@ -124,34 +124,34 @@ const kitVersion = "0.1.0"
 
 // Call is the envelope shell: every return path from dispatch is normalized so
 // Status/OK/Meta and a clamped Summary hold on success and failure alike.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "verify_plan":
 		return k.plan(ctx, call)
 	case "verify_execute":
 		return k.execute(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (k *Kit) plan(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) plan(ctx context.Context, call core.Call) (core.Result, error) {
 	var in planInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
-	target, err := capkit.TargetFromString(call.Context.ProjectID, in.Target)
+	target, err := core.TargetFromString(call.Context.ProjectID, in.Target)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	fps, err := k.fingerprints.Fingerprint(ctx, target)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	products := append([]string(nil), in.Products...)
 	if len(products) == 0 {
@@ -161,13 +161,13 @@ func (k *Kit) plan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 			}
 		}
 	}
-	q := capkit.TemplateQuery{
+	q := core.TemplateQuery{
 		Products: unique(products), CVE: in.CVE, Tags: in.Tags,
 		Severity: in.Severity, Kind: in.Kind, Limit: in.Limit,
 	}
 	refs, err := k.catalog.Search(ctx, q)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	type candidate struct {
 		ID     string `json:"id"`
@@ -189,7 +189,7 @@ func (k *Kit) plan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 	}
 	summary := fmt.Sprintf("按 %d 个指纹为 %s 规划 %d 个模板（高危 %d 个）",
 		len(fps), strings.TrimSpace(in.Target), len(cands), highRisk)
-	return capkit.SuccessResult(summary, out)
+	return core.SuccessResult(summary, out)
 }
 
 // isHighSeverity reports whether a template meta severity counts as high risk.
@@ -201,24 +201,24 @@ func isHighSeverity(sev string) bool {
 	return false
 }
 
-func (k *Kit) execute(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) execute(ctx context.Context, call core.Call) (core.Result, error) {
 	var in executeInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if len(in.TemplateIDs) == 0 {
-		return capkit.FailResult(capkit.InvalidInput("template_ids is required")), nil
+		return core.FailResult(core.InvalidInput("template_ids is required")), nil
 	}
-	target, err := capkit.TargetFromString(call.Context.ProjectID, in.Target)
+	target, err := core.TargetFromString(call.Context.ProjectID, in.Target)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
-	byKind := map[string][]capkit.TemplateRef{}
+	byKind := map[string][]core.TemplateRef{}
 	var missing []string
 	for _, id := range in.TemplateIDs {
 		ref, ok, err := k.catalog.Get(ctx, id)
 		if err != nil {
-			return capkit.FailResult(err), nil
+			return core.FailResult(err), nil
 		}
 		if !ok {
 			missing = append(missing, id)
@@ -231,18 +231,18 @@ func (k *Kit) execute(ctx context.Context, call capkit.Call) (capkit.Result, err
 		byKind[kind] = append(byKind[kind], ref)
 	}
 	if len(missing) > 0 {
-		return capkit.FailResult(capkit.NotFound("templates not found: " + strings.Join(missing, ", "))), nil
+		return core.FailResult(core.NotFound("templates not found: " + strings.Join(missing, ", "))), nil
 	}
 	results := make([]map[string]any, 0, len(byKind))
 	hits, confirmed := 0, 0
 	for kind, refs := range byKind {
 		engine, ok := k.engines[kind]
 		if !ok {
-			return capkit.FailResult(capkit.Unavailable("no template engine for kind " + kind)), nil
+			return core.FailResult(core.Unavailable("no template engine for kind " + kind)), nil
 		}
 		engineRes, err := engine.Execute(ctx, refs, target, in.Options)
 		if err != nil {
-			return capkit.FailResult(err), nil
+			return core.FailResult(err), nil
 		}
 		hits += len(engineRes.Findings)
 		for _, f := range engineRes.Findings {
@@ -254,7 +254,7 @@ func (k *Kit) execute(ctx context.Context, call capkit.Call) (capkit.Result, err
 	}
 	summary := fmt.Sprintf("对 %s 执行 %d 个模板，命中 %d 项，其中确认 %d 项",
 		strings.TrimSpace(in.Target), len(in.TemplateIDs), hits, confirmed)
-	return capkit.SuccessResult(summary, map[string]any{
+	return core.SuccessResult(summary, map[string]any{
 		"target": target, "results": results, "engine_count": len(results),
 	})
 }

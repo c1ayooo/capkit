@@ -10,7 +10,7 @@ Providers:
 - `kuaicha` (快查, cookie)
 - `fengniao` (风鸟, cookie or username/password auto-login)
 
-All HTTP goes through `capkit.Fetcher`; provider config (cookie/token) is
+All HTTP goes through `core.Fetcher`; provider config (cookie/token) is
 injected by the host and never stored by the kit.
 
 ## Capability surface

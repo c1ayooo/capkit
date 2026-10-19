@@ -2,7 +2,7 @@
 // phase P3 — "杀软识别指纹库").
 //
 // It is identification only. The kit runs read-only enumeration over a
-// capkit.Session (processes, services, drivers, registry keys) and matches what
+// core.Session (processes, services, drivers, registry keys) and matches what
 // it finds against a static fingerprint database of well-known AV/EDR products.
 // It returns the identified products, their defensive categories, and the
 // signatures that matched — decision support for the operator. It builds or
@@ -12,7 +12,7 @@
 // A second tool, av_list, returns the fingerprint database's known products so
 // an operator can review coverage without touching a target.
 //
-// Everything runs THROUGH a capkit.Session resolved from capkit.Deps.Sessions.
+// Everything runs THROUGH a core.Session resolved from core.Deps.Sessions.
 package avkit
 
 import (
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 const (
@@ -94,64 +94,64 @@ func DefaultDatabase() Database {
 
 // Capability exposes the AV/EDR identification tools.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 	db   Database
 }
 
 // NewCapability builds the capability. An empty database falls back to the
 // built-in default so the tool always has something to match against.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	db := DefaultDatabase()
 	return &Capability{deps: deps, db: db}, nil
 }
 
 // Manifest declares the AV/EDR tool surface.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: kitName, Version: kitVersion, APIVersion: apiVersion,
 		Requires: []string{"scope", "limiter", "audit", "sessions"},
-		Tools:    []capkit.ToolSpec{detectSpec(), listSpec()},
+		Tools:    []core.ToolSpec{detectSpec(), listSpec()},
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "av_detect":
 		return c.detect(ctx, call)
 	case "av_list":
 		return c.list(call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) session(id string) (capkit.Session, *capkit.Error) {
+func (c *Capability) session(id string) (core.Session, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	if strings.TrimSpace(id) == "" {
-		return nil, capkit.InvalidInput("session_id 必填")
+		return nil, core.InvalidInput("session_id 必填")
 	}
 	s, ok := c.deps.Sessions.Get(id)
 	if !ok {
-		return nil, capkit.NotFound("会话不存在: " + id)
+		return nil, core.NotFound("会话不存在: " + id)
 	}
 	return s, nil
 }
 
-func (c *Capability) run(ctx context.Context, s capkit.Session, cmd string, timeout time.Duration) (capkit.Output, bool) {
-	out, err := s.Exec(ctx, cmd, capkit.ExecOpts{Timeout: timeout, MaxOutput: 256 << 10})
+func (c *Capability) run(ctx context.Context, s core.Session, cmd string, timeout time.Duration) (core.Output, bool) {
+	out, err := s.Exec(ctx, cmd, core.ExecOpts{Timeout: timeout, MaxOutput: 256 << 10})
 	if err != nil {
-		return capkit.Output{Command: cmd}, false
+		return core.Output{Command: cmd}, false
 	}
 	return out, true
 }
 
-func detectPlatform(ctx context.Context, c *Capability, s capkit.Session, to time.Duration) string {
+func detectPlatform(ctx context.Context, c *Capability, s core.Session, to time.Duration) string {
 	if os := strings.ToLower(strings.TrimSpace(s.Info().OS)); os != "" {
 		if strings.Contains(os, "win") {
 			return "windows"
@@ -166,12 +166,12 @@ func detectPlatform(ctx context.Context, c *Capability, s capkit.Session, to tim
 
 // ---- tool specs ----
 
-func detectSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func detectSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "av_detect",
 		Description: "只读识别会话目标（Linux/Windows）上已安装的杀软/EDR：进程、服务、内核驱动、注册表键、关键文件指纹。返回识别到的产品、防御类别与命中签名。只做识别与决策支持，不生成/落地任何绕过载荷。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -195,11 +195,11 @@ func detectSpec() capkit.ToolSpec {
 	}
 }
 
-func listSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func listSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "av_list",
 		Description: "返回库内已知杀软/EDR 指纹库的产品清单（含类别与已知防御要点），无需会话。供操作员复核覆盖度。",
-		Risk:        capkit.RiskLow,
+		Risk:        core.RiskLow,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["edr","av","ngav","epp","logging","firewall"]}}}`),
 		OutputSchema: json.RawMessage(`{
   "type":"object",
@@ -213,7 +213,7 @@ func listSpec() capkit.ToolSpec {
 
 // ---- handlers ----
 
-func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) detect(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID string `json:"session_id"`
 		Platform  string `json:"platform"`
@@ -221,20 +221,20 @@ func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Resul
 		TimeoutMS int    `json:"timeout_ms"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	s, e := c.session(in.SessionID)
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
-	to := capkit.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
+	to := core.TimeoutFromMS(in.TimeoutMS, defaultTimeout, maxTimeout)
 	platform := strings.ToLower(strings.TrimSpace(in.Platform))
 	if platform == "" || platform == "auto" {
 		platform = detectPlatform(ctx, c, s, to)
 	}
 	cmds := detectCommands(platform)
 	outs := make([]cmdOut, 0, len(cmds))
-	var raws []capkit.Output
+	var raws []core.Output
 	fail := 0
 	for _, cm := range cmds {
 		o, ok := c.run(ctx, s, cm.Command, perCmdTimeout)
@@ -242,48 +242,48 @@ func (c *Capability) detect(ctx context.Context, call capkit.Call) (capkit.Resul
 			fail++
 		}
 		raws = append(raws, o)
-		outs = append(outs, cmdOut{Label: cm.Label, Command: cm.Command, Output: capkit.Truncate(o.Stdout, 8192), ExitCode: o.ExitCode, OK: ok})
+		outs = append(outs, cmdOut{Label: cm.Label, Command: cm.Command, Output: core.Truncate(o.Stdout, 8192), ExitCode: o.ExitCode, OK: ok})
 	}
 	merged := mergeOutputs(outs)
 	cat := strings.ToLower(strings.TrimSpace(in.Category))
 	detections := c.matchAll(merged, platform, cat)
 
-	status := capkit.StatusSuccess
+	status := core.StatusSuccess
 	summary := fmt.Sprintf("%s 平台识别到 %d 个杀软/EDR 产品", platform, len(detections))
 	if fail > 0 {
-		status = capkit.StatusPartial
+		status = core.StatusPartial
 		summary = fmt.Sprintf("识别完成：%d/%d 命令失败，命中 %d 个产品", fail, len(cmds), len(detections))
 	}
 	if len(detections) == 0 {
 		summary = fmt.Sprintf("%s 平台未在指纹库中发现已知杀软/EDR（命令失败 %d 项）", platform, fail)
 	}
-	data, _ := capkit.DataResult(map[string]any{
+	data, _ := core.DataResult(map[string]any{
 		"session_id": in.SessionID, "platform": platform,
 		"count": len(detections), "detections": detections, "commands": outs,
 	})
 	data.Status = status
-	data.OK = status == capkit.StatusSuccess
-	data.Summary = capkit.ClampSummary(summary)
-	data.Evidence = capkit.EvidenceRefs(raws...)
+	data.OK = status == core.StatusSuccess
+	data.Summary = core.ClampSummary(summary)
+	data.Evidence = core.EvidenceRefs(raws...)
 	if len(detections) > 0 {
 		data.Findings = findingsFor(detections)
-		data.Next = []capkit.NextStep{{
+		data.Next = []core.NextStep{{
 			Tool:          "av_list",
 			Reason:        "复核库内覆盖度与每个产品的防御要点，决定后续规避策略（仅决策支持）",
-			Risk:          capkit.RiskLow,
+			Risk:          core.RiskLow,
 			Preconditions: []string{"av.detected"},
 		}}
 	}
 	return data, nil
 }
 
-func (c *Capability) list(call capkit.Call) (capkit.Result, error) {
+func (c *Capability) list(call core.Call) (core.Result, error) {
 	var in struct {
 		Category string `json:"category"`
 	}
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &in); err != nil {
-			return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+			return core.FailResult(core.InvalidInput(err.Error())), nil
 		}
 	}
 	cat := strings.ToLower(strings.TrimSpace(in.Category))
@@ -310,7 +310,7 @@ func (c *Capability) list(call capkit.Call) (capkit.Result, error) {
 	for _, p := range prods {
 		out = append(out, public{p.ID, p.Name, p.Vendor, p.Category, p.Platform, p.Notes})
 	}
-	data, _ := capkit.SuccessResult(fmt.Sprintf("库内已知产品 %d 个", len(out)), map[string]any{"count": len(out), "products": out})
+	data, _ := core.SuccessResult(fmt.Sprintf("库内已知产品 %d 个", len(out)), map[string]any{"count": len(out), "products": out})
 	return data, nil
 }
 
@@ -377,14 +377,14 @@ func mergeOutputs(outs []cmdOut) string {
 	return b.String()
 }
 
-func findingsFor(dets []Detection) []capkit.Finding {
-	out := make([]capkit.Finding, 0, len(dets))
+func findingsFor(dets []Detection) []core.Finding {
+	out := make([]core.Finding, 0, len(dets))
 	for _, d := range dets {
 		var sigs []string
 		for _, m := range d.Matches {
 			sigs = append(sigs, m.Kind+":"+m.Value)
 		}
-		out = append(out, capkit.Finding{
+		out = append(out, core.Finding{
 			Kind:        "av:" + string(d.Category),
 			Confirmed:   true,
 			Fingerprint: "av|" + d.ProductID + "|" + strings.Join(sigs, ","),

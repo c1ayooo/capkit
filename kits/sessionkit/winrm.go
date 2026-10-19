@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // WinRMOpener opens a Windows Remote Management foothold. WinRM is a SOAP
-// protocol over HTTP(S), so it rides the host's capkit.HTTPDoer port: scope,
+// protocol over HTTP(S), so it rides the host's core.HTTPDoer port: scope,
 // rate limiting and audit apply to every WSMan call exactly as they do to any
 // other HTTP request (docs §3.1: sessionkit owns SSH/WinRM/SMB/CLI transports).
 //
@@ -24,7 +24,7 @@ import (
 // URL through unchanged.
 type WinRMOpener struct {
 	// HTTP is required and must be the gate-aware client.
-	HTTP capkit.HTTPDoer
+	HTTP core.HTTPDoer
 	// TLS selects https (5986) over http (5985).
 	TLS bool
 	// Port overrides the default for the chosen scheme.
@@ -34,9 +34,9 @@ type WinRMOpener struct {
 }
 
 // Open creates a remote shell on the target and returns a session bound to it.
-func (o *WinRMOpener) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Session, error) {
+func (o *WinRMOpener) Open(ctx context.Context, spec core.SessionSpec) (core.Session, error) {
 	if o.HTTP == nil {
-		return nil, capkit.Unavailable("WinRM 需要 HTTPDoer 端口（scope+rate+audit 网关）")
+		return nil, core.Unavailable("WinRM 需要 HTTPDoer 端口（scope+rate+audit 网关）")
 	}
 	scheme := "http"
 	port := 5985
@@ -55,8 +55,8 @@ func (o *WinRMOpener) Open(ctx context.Context, spec capkit.SessionSpec) (capkit
 		http:     o.HTTP,
 		endpoint: endpoint,
 		auth:     basicAuth(spec.Domain, spec.User, spec.Secret),
-		timeout:  time.Duration(capkit.FirstPositive(o.OperationTimeoutMS, 60000)) * time.Millisecond,
-		info: capkit.SessionInfo{
+		timeout:  time.Duration(core.FirstPositive(o.OperationTimeoutMS, 60000)) * time.Millisecond,
+		info: core.SessionInfo{
 			Kind: "winrm", Host: spec.Host, Port: port, User: spec.User,
 			OS: "windows", Labels: spec.Labels,
 			Meta: map[string]string{"endpoint": endpoint, "auth": "basic"},
@@ -80,15 +80,15 @@ func (o *WinRMOpener) Open(ctx context.Context, spec capkit.SessionSpec) (capkit
 // WinRMSession is a live WinRM foothold. Each Exec runs cmd.exe /c through the
 // remote shell.
 type WinRMSession struct {
-	http     capkit.HTTPDoer
+	http     core.HTTPDoer
 	endpoint string
 	auth     string
 	timeout  time.Duration
 	shellID  string
-	info     capkit.SessionInfo
+	info     core.SessionInfo
 }
 
-func (s *WinRMSession) Info() capkit.SessionInfo { return s.info }
+func (s *WinRMSession) Info() core.SessionInfo { return s.info }
 
 // Close deletes the remote shell; the WinRM protocol has no connection to drop.
 func (s *WinRMSession) Close() error {
@@ -103,13 +103,13 @@ func (s *WinRMSession) Close() error {
 }
 
 // Exec runs a command line through cmd.exe /c and returns its output.
-func (s *WinRMSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts) (capkit.Output, error) {
+func (s *WinRMSession) Exec(ctx context.Context, cmd string, opts core.ExecOpts) (core.Output, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return capkit.Output{}, fmt.Errorf("命令为空")
+		return core.Output{}, fmt.Errorf("命令为空")
 	}
 	if s.shellID == "" {
-		return capkit.Output{}, fmt.Errorf("WinRM 会话已关闭")
+		return core.Output{}, fmt.Errorf("WinRM 会话已关闭")
 	}
 	timeout := s.timeout
 	if opts.Timeout > 0 && opts.Timeout < timeout {
@@ -120,19 +120,19 @@ func (s *WinRMSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpt
 	}
 	started := time.Now()
 
-	shell := capkit.FirstNonEmpty(opts.Shell, "cmd.exe")
+	shell := core.FirstNonEmpty(opts.Shell, "cmd.exe")
 	runBody := "<rsp:CommandLine><rsp:Command>" + xmlEscape(shell) +
 		"</rsp:Command><rsp:Arguments>/c " + xmlEscape(cmd) + "</rsp:Arguments></rsp:CommandLine>"
 	resp, err := s.call(ctx, runBody, timeout)
 	if err != nil {
-		return capkit.Output{}, err
+		return core.Output{}, err
 	}
 	if f := resp.Body.Fault; f.Reason != "" || f.Code != "" {
-		return capkit.Output{}, capkit.UpstreamError("WinRM fault: " + capkit.FirstNonEmpty(f.Reason, f.Code))
+		return core.Output{}, core.UpstreamError("WinRM fault: " + core.FirstNonEmpty(f.Reason, f.Code))
 	}
 	commandID := resp.Body.CommandResponse.CommandID
 	if commandID == "" {
-		return capkit.Output{}, fmt.Errorf("WinRM 未返回 CommandId")
+		return core.Output{}, fmt.Errorf("WinRM 未返回 CommandId")
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -143,7 +143,7 @@ func (s *WinRMSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpt
 		recvBody := `<rsp:Receive><rsp:DesiredStream CommandId="` + xmlEscape(commandID) + `">stdout stderr</rsp:DesiredStream></rsp:Receive>`
 		rr, rerr := s.call(ctx, recvBody, timeout)
 		if rerr != nil {
-			return capkit.Output{}, rerr
+			return core.Output{}, rerr
 		}
 		st := rr.Body.ReceiveResponse
 		for _, stream := range st.Streams {
@@ -166,11 +166,11 @@ func (s *WinRMSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpt
 	}
 	dur := time.Since(started)
 	if !done {
-		out := capkit.OutputFor(cmd, stdout.String(), stderr.String(), exit, dur, opts.MaxOutput)
+		out := core.OutputFor(cmd, stdout.String(), stderr.String(), exit, dur, opts.MaxOutput)
 		out.Truncated = true
 		return out, fmt.Errorf("WinRM 命令未在轮询预算内结束（command_id=%s）", commandID)
 	}
-	return capkit.OutputFor(cmd, stdout.String(), stderr.String(), exit, dur, opts.MaxOutput), nil
+	return core.OutputFor(cmd, stdout.String(), stderr.String(), exit, dur, opts.MaxOutput), nil
 }
 
 // --- WSMan plumbing ---
@@ -190,7 +190,7 @@ func (s *WinRMSession) createShell(ctx context.Context) error {
 		return err
 	}
 	if f := resp.Body.Fault; f.Reason != "" || f.Code != "" {
-		return capkit.UpstreamError("WinRM fault: " + capkit.FirstNonEmpty(f.Reason, f.Code))
+		return core.UpstreamError("WinRM fault: " + core.FirstNonEmpty(f.Reason, f.Code))
 	}
 	s.shellID = resp.Body.Shell.ShellID
 	return nil
@@ -219,7 +219,7 @@ func (s *WinRMSession) call(ctx context.Context, body string, timeout time.Durat
 	if s.auth != "" {
 		headers["Authorization"] = s.auth
 	}
-	resp, err := s.http.Do(ctx, capkit.Request{
+	resp, err := s.http.Do(ctx, core.Request{
 		Method: "POST", URL: s.endpoint, Headers: headers,
 		Body: []byte(b.String()), Timeout: timeout,
 	})
@@ -227,11 +227,11 @@ func (s *WinRMSession) call(ctx context.Context, body string, timeout time.Durat
 		return nil, err
 	}
 	if resp.Status >= 400 {
-		return nil, capkit.UpstreamError(fmt.Sprintf("WinRM HTTP %d: %s", resp.Status, capkit.Truncate(string(resp.Body), 200)))
+		return nil, core.UpstreamError(fmt.Sprintf("WinRM HTTP %d: %s", resp.Status, core.Truncate(string(resp.Body), 200)))
 	}
 	var out wsmanEnvelope
 	if err := xml.Unmarshal(resp.Body, &out); err != nil {
-		return nil, capkit.UpstreamError("WinRM 响应无法解析: " + err.Error())
+		return nil, core.UpstreamError("WinRM 响应无法解析: " + err.Error())
 	}
 	return &out, nil
 }

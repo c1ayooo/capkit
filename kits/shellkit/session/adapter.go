@@ -1,5 +1,5 @@
 // adapter.go bridges the WebShell model (Session + host Executor) to the
-// capkit.Session contract, so a WebShell foothold gets the same Exec/upload/
+// core.Session contract, so a WebShell foothold gets the same Exec/upload/
 // download surface as SSH and every downstream kit works against it unchanged.
 package session
 
@@ -12,18 +12,18 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // CapabilitySession wraps a WebShell Session plus its host Executor into a
-// capkit.Session.
+// core.Session.
 type CapabilitySession struct {
 	Shell    Session
 	Executor Executor
 }
 
 // Info describes the foothold without performing I/O.
-func (c *CapabilitySession) Info() capkit.SessionInfo {
+func (c *CapabilitySession) Info() core.SessionInfo {
 	host := ""
 	if u, err := url.Parse(c.Shell.URL); err == nil {
 		host = u.Hostname()
@@ -33,7 +33,7 @@ func (c *CapabilitySession) Info() capkit.SessionInfo {
 	if c.Shell.ShellType != "" {
 		labels = append(labels, c.Shell.ShellType)
 	}
-	return capkit.SessionInfo{
+	return core.SessionInfo{
 		ID: c.shellID(), Kind: kind, Host: host, User: "",
 		Labels: labels,
 		Meta: map[string]string{
@@ -54,21 +54,21 @@ func (c *CapabilitySession) shellID() string {
 func (c *CapabilitySession) Close() error { return nil }
 
 // Exec runs a command through the WebShell executor.
-func (c *CapabilitySession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts) (capkit.Output, error) {
+func (c *CapabilitySession) Exec(ctx context.Context, cmd string, opts core.ExecOpts) (core.Output, error) {
 	if c.Executor == nil {
-		return capkit.Output{}, fmt.Errorf("WebShell Executor 未注入")
+		return core.Output{}, fmt.Errorf("WebShell Executor 未注入")
 	}
 	if strings.TrimSpace(cmd) == "" {
-		return capkit.Output{}, fmt.Errorf("命令为空")
+		return core.Output{}, fmt.Errorf("命令为空")
 	}
 	if opts.Dir != "" {
-		cmd = "cd " + capkit.ShellQuote(opts.Dir) + " && " + cmd
+		cmd = "cd " + core.ShellQuote(opts.Dir) + " && " + cmd
 	}
 	res, err := c.Executor.Exec(ctx, c.Shell, cmd)
 	if err != nil {
-		return capkit.Output{}, err
+		return core.Output{}, err
 	}
-	out := capkit.Output{Command: cmd, Stdout: res.Output, ExitCode: 0, EvidenceID: res.TrafficID}
+	out := core.Output{Command: cmd, Stdout: res.Output, ExitCode: 0, EvidenceID: res.TrafficID}
 	if res.HTTPStatus >= 400 {
 		out.ExitCode = 1
 	}

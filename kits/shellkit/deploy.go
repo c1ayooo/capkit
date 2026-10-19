@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/shellkit/payload"
 	"github.com/c1ayooo/capkit/kits/shellkit/protocol"
 )
@@ -65,12 +65,12 @@ type WebShellDropResult struct {
 
 // webshellDeploySpec declares the tool. Risk is high: it writes executable
 // content to a target, so the runtime's approval gate is mandatory.
-func webshellDeploySpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func webshellDeploySpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "webshell_deploy",
 		Description: "把生成的 WebShell 载荷投递到目标，并返回可直接用于 session_open(kind=webshell) 的参数。适用已确认命令执行或文件写入的漏洞点（如 cmdi_probe/cmdi_execute 命中的注入点）。出参含落点 URL、session 参数与删除落盘件的清理命令——投递产物必须可清理。",
-		Risk:        capkit.RiskHigh,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
+		Risk:        core.RiskHigh,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 2, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -101,7 +101,7 @@ func webshellDeploySpec() capkit.ToolSpec {
     "cleanup":{"type":"object","description":"删除落盘件的命令与方式"}
   }
 }`),
-		ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+		ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 			var in struct {
 				Target string `json:"target"`
 			}
@@ -111,11 +111,11 @@ func webshellDeploySpec() capkit.ToolSpec {
 			if strings.TrimSpace(in.Target) == "" {
 				return nil, fmt.Errorf("target 必填")
 			}
-			t, err := capkit.TargetFromURL(0, strings.TrimSpace(in.Target))
+			t, err := core.TargetFromURL(0, strings.TrimSpace(in.Target))
 			if err != nil {
 				return nil, err
 			}
-			return []capkit.Target{t}, nil
+			return []core.Target{t}, nil
 		},
 	}
 }
@@ -133,29 +133,29 @@ type deployInput struct {
 	Watermark string `json:"watermark"`
 }
 
-func (c *Capability) deploy(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) deploy(ctx context.Context, call core.Call) (core.Result, error) {
 	if c.deployer == nil {
-		return capkit.FailResult(capkit.ToolMissing(
+		return core.FailResult(core.ToolMissing(
 			"WebShellDeployer 未注入（宿主需提供 shellkit.WebShellDeployer）")), nil
 	}
 	var in deployInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.Target) == "" {
-		return capkit.FailResult(capkit.InvalidInput("target 必填")), nil
+		return core.FailResult(core.InvalidInput("target 必填")), nil
 	}
 	shellType, err := payload.NormalizeShellType(in.ShellType)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	variant, err := payload.NormalizeVariant(in.Variant)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	proto, err := protocol.NormalizeProtocol(in.Protocol)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 
 	gen, err := payload.Generate(payload.Options{
@@ -167,7 +167,7 @@ func (c *Capability) deploy(ctx context.Context, call capkit.Call) (capkit.Resul
 		Protocol:  string(proto),
 	})
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput("载荷生成失败：" + err.Error())), nil
+		return core.FailResult(core.InvalidInput("载荷生成失败：" + err.Error())), nil
 	}
 	filename := strings.TrimSpace(in.Filename)
 	if filename == "" {
@@ -190,10 +190,10 @@ func (c *Capability) deploy(ctx context.Context, call capkit.Call) (capkit.Resul
 		Protocol:  gen.Protocol,
 	})
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError("投递失败：" + err.Error())), nil
+		return core.FailResult(core.UpstreamError("投递失败：" + err.Error())), nil
 	}
 	if res == nil || strings.TrimSpace(res.FileURL) == "" {
-		return capkit.FailResult(capkit.UpstreamError("投递未返回落点 URL")), nil
+		return core.FailResult(core.UpstreamError("投递未返回落点 URL")), nil
 	}
 
 	// session_open's parameters, ready to paste: the URL to hit, the secret that
@@ -219,7 +219,7 @@ func (c *Capability) deploy(ctx context.Context, call capkit.Call) (capkit.Resul
 		cleanup["missing"] = "宿主未给出清理方式；落盘件在目标上会留存，需人工按 file_url 删除"
 	}
 
-	out, _ := capkit.DataResult(map[string]any{
+	out, _ := core.DataResult(map[string]any{
 		"file_url":    strings.TrimSpace(res.FileURL),
 		"sha256":      gen.SHA256,
 		"filename":    filename,
@@ -230,22 +230,22 @@ func (c *Capability) deploy(ctx context.Context, call capkit.Call) (capkit.Resul
 		"webshell":    sessionSpec,
 		"cleanup":     cleanup,
 	})
-	out.Summary = capkit.ClampSummary(fmt.Sprintf(
+	out.Summary = core.ClampSummary(fmt.Sprintf(
 		"已在 %s 落地 %s shell（模板 %s，sha256 %s…），可用 session_open(kind=webshell) 接管",
 		strings.TrimSpace(res.FileURL), gen.ShellType, gen.TemplateID, shortHash(gen.SHA256)))
 	out.Meta.Target = strings.TrimSpace(in.Target)
-	out.Next = []capkit.NextStep{
+	out.Next = []core.NextStep{
 		{
 			Tool:          "session_open",
 			Reason:        "按返回的 webshell 参数接管刚落地的会话",
-			Risk:          capkit.RiskHigh,
+			Risk:          core.RiskHigh,
 			Preconditions: []string{"webshell.file_url"},
 			Params:        mustJSON(sessionSpec),
 		},
 		{
 			Tool:          "session_exec",
 			Reason:        "会话打开后执行 id 确认回显",
-			Risk:          capkit.RiskHigh,
+			Risk:          core.RiskHigh,
 			Preconditions: []string{"session.session_id"},
 		},
 	}

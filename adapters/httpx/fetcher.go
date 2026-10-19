@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Fetcher is the non-target-scoped external download client. It applies rate
@@ -16,25 +16,25 @@ import (
 // updates, GitHub search and threat intel are external infrastructure).
 type Fetcher struct {
 	Base         *http.Client
-	Limiter      capkit.Limiter
-	Audit        capkit.AuditSink
-	Clock        capkit.Clock
+	Limiter      core.Limiter
+	Audit        core.AuditSink
+	Clock        core.Clock
 	MaxBodyBytes int64
-	RateLimit    capkit.RateLimitSpec
+	RateLimit    core.RateLimitSpec
 }
 
-func NewFetcher(limiter capkit.Limiter, audit capkit.AuditSink) *Fetcher {
+func NewFetcher(limiter core.Limiter, audit core.AuditSink) *Fetcher {
 	return &Fetcher{Limiter: limiter, Audit: audit, MaxBodyBytes: 10 << 20}
 }
 
-func (f *Fetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
-	target, err := capkit.TargetFromURL(0, req.URL)
+func (f *Fetcher) Fetch(ctx context.Context, req core.Request) (*core.Response, error) {
+	target, err := core.TargetFromURL(0, req.URL)
 	if err != nil {
-		return nil, capkit.InvalidInput(err.Error())
+		return nil, core.InvalidInput(err.Error())
 	}
 	spec := f.RateLimit
 	if spec.PerSecond <= 0 {
-		spec = capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2}
+		spec = core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2}
 	}
 	if f.Limiter != nil {
 		release, err := f.Limiter.Acquire(ctx, target.Key(), spec)
@@ -75,7 +75,7 @@ func (f *Fetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Respon
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, body)
 	if err != nil {
-		return nil, capkit.InvalidInput(err.Error())
+		return nil, core.InvalidInput(err.Error())
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
@@ -84,7 +84,7 @@ func (f *Fetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Respon
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		f.audit(ctx, target, "error", err.Error(), time.Since(started))
-		return nil, capkit.Unavailable(err.Error())
+		return nil, core.Unavailable(err.Error())
 	}
 	defer resp.Body.Close()
 	max := f.MaxBodyBytes
@@ -93,7 +93,7 @@ func (f *Fetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Respon
 	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, max))
 	if readErr != nil {
-		return nil, capkit.Unavailable("read response: " + readErr.Error())
+		return nil, core.Unavailable("read response: " + readErr.Error())
 	}
 	headers := map[string][]string{}
 	for k, vs := range resp.Header {
@@ -104,21 +104,21 @@ func (f *Fetcher) Fetch(ctx context.Context, req capkit.Request) (*capkit.Respon
 		finalURL = resp.Request.URL.String()
 	}
 	f.audit(ctx, target, "ok", "", time.Since(started))
-	return &capkit.Response{
+	return &core.Response{
 		Status: resp.StatusCode, Headers: headers, Body: data,
 		Duration: time.Since(started), FinalURL: finalURL,
 	}, nil
 }
 
-func (f *Fetcher) audit(ctx context.Context, target capkit.Target, status, errMsg string, d time.Duration) {
+func (f *Fetcher) audit(ctx context.Context, target core.Target, status, errMsg string, d time.Duration) {
 	if f.Audit == nil {
 		return
 	}
-	cc, _ := capkit.CallContextFrom(ctx)
-	f.Audit.Record(ctx, capkit.AuditEvent{
+	cc, _ := core.CallContextFrom(ctx)
+	f.Audit.Record(ctx, core.AuditEvent{
 		TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
-		Capability: "fetcher", Tool: "fetch", Risk: capkit.RiskLow,
-		Targets: []capkit.Target{target}, Phase: "fetch", Status: status, Error: errMsg,
+		Capability: "fetcher", Tool: "fetch", Risk: core.RiskLow,
+		Targets: []core.Target{target}, Phase: "fetch", Status: status, Error: errMsg,
 		DurationMS: d.Milliseconds(), StartedAt: time.Now().Add(-d), FinishedAt: time.Now(),
 	})
 }

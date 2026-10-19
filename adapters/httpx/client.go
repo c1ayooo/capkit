@@ -9,40 +9,40 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Client is the gate-aware HTTPDoer injected into kits. It enforces scope on
 // the initial URL and every redirect hop, and applies per-host rate limiting.
 type Client struct {
 	Base         *http.Client
-	Scope        capkit.ScopeChecker
-	Limiter      capkit.Limiter
-	Audit        capkit.AuditSink
-	Clock        capkit.Clock
+	Scope        core.ScopeChecker
+	Limiter      core.Limiter
+	Audit        core.AuditSink
+	Clock        core.Clock
 	MaxBodyBytes int64
-	RateLimit    capkit.RateLimitSpec
+	RateLimit    core.RateLimitSpec
 }
 
-func New(scope capkit.ScopeChecker, limiter capkit.Limiter, audit capkit.AuditSink) *Client {
+func New(scope core.ScopeChecker, limiter core.Limiter, audit core.AuditSink) *Client {
 	return &Client{Scope: scope, Limiter: limiter, Audit: audit, MaxBodyBytes: 10 << 20}
 }
 
-func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
-	cc, _ := capkit.CallContextFrom(ctx)
-	target, err := capkit.TargetFromURL(cc.ProjectID, req.URL)
+func (c *Client) Do(ctx context.Context, req core.Request) (*core.Response, error) {
+	cc, _ := core.CallContextFrom(ctx)
+	target, err := core.TargetFromURL(cc.ProjectID, req.URL)
 	if err != nil {
-		return nil, capkit.InvalidInput(err.Error())
+		return nil, core.InvalidInput(err.Error())
 	}
 	if c.Scope == nil {
-		return nil, capkit.ScopeDenied("scope checker is not configured")
+		return nil, core.ScopeDenied("scope checker is not configured")
 	}
 	if err := c.Scope.Check(ctx, target); err != nil {
 		return nil, err
 	}
 	spec := c.RateLimit
 	if spec.PerSecond <= 0 {
-		spec = capkit.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4}
+		spec = core.RateLimitSpec{PerSecond: 10, Burst: 5, Concurrency: 4}
 	}
 	if c.Limiter != nil {
 		release, err := c.Limiter.Acquire(ctx, target.Key(), spec)
@@ -78,7 +78,7 @@ func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, 
 		if len(via) >= 10 {
 			return errors.New("too many redirects")
 		}
-		t, terr := capkit.TargetFromURL(cc.ProjectID, next.URL.String())
+		t, terr := core.TargetFromURL(cc.ProjectID, next.URL.String())
 		if terr != nil {
 			return terr
 		}
@@ -95,7 +95,7 @@ func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, 
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, body)
 	if err != nil {
-		return nil, capkit.InvalidInput(err.Error())
+		return nil, core.InvalidInput(err.Error())
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
@@ -108,7 +108,7 @@ func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, 
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		c.audit(ctx, cc, target, "error", err.Error(), time.Since(started))
-		return nil, capkit.Unavailable(err.Error())
+		return nil, core.Unavailable(err.Error())
 	}
 	defer resp.Body.Close()
 
@@ -118,7 +118,7 @@ func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, 
 	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, max))
 	if readErr != nil {
-		return nil, capkit.Unavailable("read response: " + readErr.Error())
+		return nil, core.Unavailable("read response: " + readErr.Error())
 	}
 	headers := map[string][]string{}
 	for k, vs := range resp.Header {
@@ -129,20 +129,20 @@ func (c *Client) Do(ctx context.Context, req capkit.Request) (*capkit.Response, 
 		finalURL = resp.Request.URL.String()
 	}
 	c.audit(ctx, cc, target, "ok", "", time.Since(started))
-	return &capkit.Response{
+	return &core.Response{
 		Status: resp.StatusCode, Headers: headers, Body: data,
 		Duration: time.Since(started), FinalURL: finalURL,
 	}, nil
 }
 
-func (c *Client) audit(ctx context.Context, cc capkit.CallContext, target capkit.Target, status, errMsg string, d time.Duration) {
+func (c *Client) audit(ctx context.Context, cc core.CallContext, target core.Target, status, errMsg string, d time.Duration) {
 	if c.Audit == nil {
 		return
 	}
-	c.Audit.Record(ctx, capkit.AuditEvent{
+	c.Audit.Record(ctx, core.AuditEvent{
 		TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
-		Capability: "httpkit", Tool: "http", Risk: capkit.RiskMedium,
-		Targets: []capkit.Target{target}, Phase: "http", Status: status, Error: errMsg,
+		Capability: "httpkit", Tool: "http", Risk: core.RiskMedium,
+		Targets: []core.Target{target}, Phase: "http", Status: status, Error: errMsg,
 		DurationMS: d.Milliseconds(), StartedAt: time.Now().Add(-d), FinishedAt: time.Now(),
 	})
 }

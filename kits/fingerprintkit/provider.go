@@ -9,34 +9,34 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
-// Provider implements capkit.FingerprintProvider. It probes the target through
+// Provider implements core.FingerprintProvider. It probes the target through
 // the gate-aware HTTPDoer, matches the rule set, and optionally records
 // evidence. It never writes assets.
 type Provider struct {
-	HTTP     capkit.HTTPDoer
+	HTTP     core.HTTPDoer
 	Rules    *RuleSet
-	Evidence capkit.EvidenceSink
+	Evidence core.EvidenceSink
 }
 
-func (p *Provider) Fingerprint(ctx context.Context, target capkit.Target) ([]capkit.Fingerprint, error) {
+func (p *Provider) Fingerprint(ctx context.Context, target core.Target) ([]core.Fingerprint, error) {
 	if p == nil || p.HTTP == nil || p.Rules == nil {
-		return nil, capkit.Unavailable("fingerprint provider is not configured")
+		return nil, core.Unavailable("fingerprint provider is not configured")
 	}
 	rawURL := strings.TrimSpace(target.URL)
 	if rawURL == "" {
-		host := capkit.FirstNonEmpty(target.Host, target.IP, target.CIDR)
+		host := core.FirstNonEmpty(target.Host, target.IP, target.CIDR)
 		if host == "" {
-			return nil, capkit.InvalidInput("target has no URL/host")
+			return nil, core.InvalidInput("target has no URL/host")
 		}
 		if target.Port > 0 {
 			host = net.JoinHostPort(host, strconv.Itoa(target.Port))
 		}
 		rawURL = "http://" + host
 	}
-	res, err := p.HTTP.Do(ctx, capkit.Request{Method: "GET", URL: rawURL, Timeout: 20 * time.Second})
+	res, err := p.HTTP.Do(ctx, core.Request{Method: "GET", URL: rawURL, Timeout: 20 * time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -45,16 +45,16 @@ func (p *Provider) Fingerprint(ctx context.Context, target capkit.Target) ([]cap
 		URL: res.FinalURL, Status: res.Status, Headers: res.Headers,
 		Body: res.Body, Cookies: cookies,
 	})
-	out := make([]capkit.Fingerprint, 0, len(techs))
+	out := make([]core.Fingerprint, 0, len(techs))
 	for _, t := range techs {
-		out = append(out, capkit.Fingerprint{
+		out = append(out, core.Fingerprint{
 			Product: t.Product, Version: t.Version, Category: t.Category,
 			Source: t.Source, Confidence: t.Confidence,
 		})
 	}
 	if p.Evidence != nil {
 		data, _ := json.Marshal(techs)
-		_, err := p.Evidence.Record(ctx, capkit.Evidence{
+		_, err := p.Evidence.Record(ctx, core.Evidence{
 			Kind: "fingerprint", Title: "fingerprint " + target.Key(), Target: target,
 			Data: data, CreatedAt: time.Now(),
 			Metadata: map[string]string{"url": rawURL, "hits": fmt.Sprint(len(techs))},

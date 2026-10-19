@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Package privesckit implements privilege-escalation enumeration and triage over
-// a post-exploitation capkit.Session (design doc §4.6, phase P2).
+// a post-exploitation core.Session (design doc §4.6, phase P2).
 //
 // It is deliberately a triage capability, not a weapon: privesc_enum runs a
 // bounded, read-only command set and normalizes what it finds; privesc_advise
-// maps those observations to ranked candidate exploits as capkit.NextStep
+// maps those observations to ranked candidate exploits as core.NextStep
 // suggestions. No exploit payload is built or executed here — that artifact
 // stays out of the library ("识别与决策在库内，成品载荷在库外").
 
@@ -25,22 +25,22 @@ const (
 )
 
 // Capability exposes the privilege-escalation tools. It depends only on the
-// injected capkit.Deps, never on a concrete transport or sibling kit.
+// injected core.Deps, never on a concrete transport or sibling kit.
 type Capability struct {
-	deps capkit.Deps
+	deps core.Deps
 }
 
 // NewCapability builds the privesc capability.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	return &Capability{deps: deps}, nil
 }
 
 // Manifest declares the privesc tool surface.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: kitName, Version: kitVersion, APIVersion: apiVersion,
 		Requires: []string{"scope", "limiter", "audit", "sessions"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			enumSpec("privesc_enum", "枚举会话目标（Linux/Windows）上的提权线索：只读、有界。Linux 采集内核/发行版、id、sudo -n -l、SUID、文件能力、可写 cron/systemd 路径、/etc/passwd 可写性；Windows 采集 whoami /priv、whoami /groups、systeminfo、服务、tasklist、AlwaysInstallElevated 与 Winlogon 自动登录注册表。返回结构化信号与归一化结论，不执行任何利用。"),
 			enumSpec("privesc_linux_enum", "Linux 平台固定版本的 privesc_enum：忽略自动判定，仅运行 Linux 只读枚举命令集。"),
 			enumSpec("privesc_windows_enum", "Windows 平台固定版本的 privesc_enum：忽略自动判定，仅运行 Windows 只读枚举命令集。"),
@@ -49,11 +49,11 @@ func Manifest() capkit.Manifest {
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the privesc tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "privesc_enum":
 		return c.enum(ctx, call, "")
@@ -64,25 +64,25 @@ func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result,
 	case "privesc_advise":
 		return c.advise(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) manager() (capkit.SessionManager, *capkit.Error) {
+func (c *Capability) manager() (core.SessionManager, *core.Error) {
 	if c.deps.Sessions == nil {
-		return nil, capkit.ToolMissing("SessionManager 未注入（宿主需提供 capkit.Deps.Sessions）")
+		return nil, core.ToolMissing("SessionManager 未注入（宿主需提供 core.Deps.Sessions）")
 	}
 	return c.deps.Sessions, nil
 }
 
 // --- tool specs ---
 
-func enumSpec(name, description string) capkit.ToolSpec {
-	return capkit.ToolSpec{
+func enumSpec(name, description string) core.ToolSpec {
+	return core.ToolSpec{
 		Name:        name,
 		Description: description,
-		Risk:        capkit.RiskMedium,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
+		Risk:        core.RiskMedium,
+		RateLimit:   core.RateLimitSpec{PerSecond: 2, Burst: 1, Concurrency: 1},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -104,12 +104,12 @@ func enumSpec(name, description string) capkit.ToolSpec {
 	}
 }
 
-func adviseSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func adviseSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name:        "privesc_advise",
-		Description: "把提权枚举结果映射为按优先级排序的候选利用（capkit.NextStep 建议），例如 PwnKit(CVE-2021-4034)、DirtyPipe(CVE-2022-0847)、sudo 配置错误、SUID 已知危险二进制、SeImpersonatePrivilege→Potato 家族、AlwaysInstallElevated→MSI。仅做识别与决策，不执行任何利用，不生成/落地载荷。输入可以是 session_id（内部先枚举）或直接的 enum_result。",
-		Risk:        capkit.RiskLow,
-		RateLimit:   capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2},
+		Description: "把提权枚举结果映射为按优先级排序的候选利用（core.NextStep 建议），例如 PwnKit(CVE-2021-4034)、DirtyPipe(CVE-2022-0847)、sudo 配置错误、SUID 已知危险二进制、SeImpersonatePrivilege→Potato 家族、AlwaysInstallElevated→MSI。仅做识别与决策，不执行任何利用，不生成/落地载荷。输入可以是 session_id（内部先枚举）或直接的 enum_result。",
+		Risk:        core.RiskLow,
+		RateLimit:   core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 2},
 		InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -134,37 +134,37 @@ func adviseSpec() capkit.ToolSpec {
 
 // enum implements privesc_enum and the platform-pinned variants. pinned is
 // "" for auto, or a fixed platform for the *_linux_enum / *_windows_enum tools.
-func (c *Capability) enum(ctx context.Context, call capkit.Call, pinned string) (capkit.Result, error) {
+func (c *Capability) enum(ctx context.Context, call core.Call, pinned string) (core.Result, error) {
 	mgr, e := c.manager()
 	if e != nil {
-		return capkit.FailResult(e), nil
+		return core.FailResult(e), nil
 	}
 	var in struct {
 		SessionID string `json:"session_id"`
 		Platform  string `json:"platform"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.SessionID) == "" {
-		return capkit.FailResult(capkit.InvalidInput("session_id 必填")), nil
+		return core.FailResult(core.InvalidInput("session_id 必填")), nil
 	}
 	s, ok := mgr.Get(in.SessionID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+		return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 	}
 	info := s.Info()
 	platform := pinned
 	if platform == "" {
-		var e2 *capkit.Error
+		var e2 *core.Error
 		if platform, e2 = resolvePlatform(in.Platform, info); e2 != nil {
-			return capkit.FailResult(e2), nil
+			return core.FailResult(e2), nil
 		}
 	}
 
 	er, err := runEnumeration(ctx, s, platform)
 	if err != nil {
-		return capkit.FailResult(capkit.UpstreamError("枚举命令执行失败: " + err.Error())), nil
+		return core.FailResult(core.UpstreamError("枚举命令执行失败: " + err.Error())), nil
 	}
 	er.SessionID = in.SessionID
 	er.Host = hostOrID(info)
@@ -172,19 +172,19 @@ func (c *Capability) enum(ctx context.Context, call capkit.Call, pinned string) 
 	target := sessionTarget(info, call.Context.ProjectID)
 	steps := advise(er.Signals)
 
-	res := capkit.NewResult(capkit.StatusSuccess, "")
+	res := core.NewResult(core.StatusSuccess, "")
 	data, _ := json.Marshal(er)
 	res.Data = data
-	res.Summary = capkit.ClampSummary(fmt.Sprintf(
+	res.Summary = core.ClampSummary(fmt.Sprintf(
 		"会话 %s 提权枚举完成（%s，%d 条命令，%d 项信号，%d 个候选）",
 		in.SessionID, platform, len(er.Commands), signalCount(er.Signals), len(steps)))
 	res.Findings = signalsFindings(er.Signals, target)
-	res.Meta = capkit.Meta{Tool: callToolName(call.Tool), Version: kitVersion, Target: target.Key()}
+	res.Meta = core.Meta{Tool: callToolName(call.Tool), Version: kitVersion, Target: target.Key()}
 	if len(steps) > 0 {
 		params, _ := json.Marshal(map[string]any{"session_id": in.SessionID, "platform": platform})
-		res.Next = []capkit.NextStep{{
+		res.Next = []core.NextStep{{
 			Tool: "privesc_advise", Reason: fmt.Sprintf("基于枚举结果生成 %d 个候选提权 exploit", len(steps)),
-			Risk: capkit.RiskLow, Params: params,
+			Risk: core.RiskLow, Params: params,
 		}}
 	}
 	res.ClampData()
@@ -192,45 +192,45 @@ func (c *Capability) enum(ctx context.Context, call capkit.Call, pinned string) 
 }
 
 // advise implements privesc_advise.
-func (c *Capability) advise(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) advise(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		SessionID  string      `json:"session_id"`
 		Platform   string      `json:"platform"`
 		EnumResult *enumResult `json:"enum_result"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 
 	var er enumResult
-	target := capkit.Target{}
+	target := core.Target{}
 	switch {
 	case in.EnumResult != nil:
 		er = *in.EnumResult
 	case strings.TrimSpace(in.SessionID) != "":
 		mgr, e := c.manager()
 		if e != nil {
-			return capkit.FailResult(e), nil
+			return core.FailResult(e), nil
 		}
 		s, ok := mgr.Get(in.SessionID)
 		if !ok {
-			return capkit.FailResult(capkit.NotFound("会话不存在: " + in.SessionID)), nil
+			return core.FailResult(core.NotFound("会话不存在: " + in.SessionID)), nil
 		}
 		info := s.Info()
 		platform, e2 := resolvePlatform(in.Platform, info)
 		if e2 != nil {
-			return capkit.FailResult(e2), nil
+			return core.FailResult(e2), nil
 		}
 		run, err := runEnumeration(ctx, s, platform)
 		if err != nil {
-			return capkit.FailResult(capkit.UpstreamError("枚举命令执行失败: " + err.Error())), nil
+			return core.FailResult(core.UpstreamError("枚举命令执行失败: " + err.Error())), nil
 		}
 		run.SessionID = in.SessionID
 		run.Host = hostOrID(info)
 		er = run
 		target = sessionTarget(info, call.Context.ProjectID)
 	default:
-		return capkit.FailResult(capkit.InvalidInput("需要 session_id 或 enum_result 之一")), nil
+		return core.FailResult(core.InvalidInput("需要 session_id 或 enum_result 之一")), nil
 	}
 
 	if er.Signals.Platform == "" {
@@ -240,28 +240,28 @@ func (c *Capability) advise(ctx context.Context, call capkit.Call) (capkit.Resul
 		er.Signals.Platform = platformLinux
 	}
 	if target.Host == "" && er.Host != "" {
-		target = capkit.Target{Kind: capkit.TargetHost, Host: strings.ToLower(er.Host)}
+		target = core.Target{Kind: core.TargetHost, Host: strings.ToLower(er.Host)}
 	}
 
 	steps := advise(er.Signals)
 
-	res := capkit.NewResult(capkit.StatusSuccess, "")
+	res := core.NewResult(core.StatusSuccess, "")
 	data, _ := json.Marshal(map[string]any{
 		"platform": er.Signals.Platform, "count": len(steps), "candidates": steps,
 	})
 	res.Data = data
-	res.Summary = capkit.ClampSummary(fmt.Sprintf(
+	res.Summary = core.ClampSummary(fmt.Sprintf(
 		"基于 %s 枚举结果给出 %d 个候选提权 exploit（仅建议，不执行）", er.Signals.Platform, len(steps)))
 	res.Findings = candidateFindings(steps, target)
 	res.Next = steps
-	res.Meta = capkit.Meta{Tool: "privesc_advise", Version: kitVersion, Target: target.Key()}
+	res.Meta = core.Meta{Tool: "privesc_advise", Version: kitVersion, Target: target.Key()}
 	res.ClampData()
 	return res, nil
 }
 
 // resolvePlatform turns the requested platform (or "auto") into a concrete one
 // using the session info. Unknown/undetectable input fails closed.
-func resolvePlatform(requested string, info capkit.SessionInfo) (string, *capkit.Error) {
+func resolvePlatform(requested string, info core.SessionInfo) (string, *core.Error) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "", platformAuto:
 		switch strings.ToLower(strings.TrimSpace(info.OS)) {
@@ -270,13 +270,13 @@ func resolvePlatform(requested string, info capkit.SessionInfo) (string, *capkit
 		case platformWindows:
 			return platformWindows, nil
 		}
-		return "", capkit.InvalidInput("无法自动判定平台（session.Info().OS 为空），请显式传 platform=linux|windows")
+		return "", core.InvalidInput("无法自动判定平台（session.Info().OS 为空），请显式传 platform=linux|windows")
 	case platformLinux:
 		return platformLinux, nil
 	case platformWindows:
 		return platformWindows, nil
 	default:
-		return "", capkit.InvalidInput("未知 platform: " + requested + "（auto|linux|windows）")
+		return "", core.InvalidInput("未知 platform: " + requested + "（auto|linux|windows）")
 	}
 }
 
@@ -329,10 +329,10 @@ func signalCount(sig Signals) int {
 // signalsFindings turns observed misconfigurations into normalized findings.
 // Config observations are Confirmed (directly read); version-range matches are
 // candidates, not confirmations.
-func signalsFindings(sig Signals, target capkit.Target) []capkit.Finding {
-	var out []capkit.Finding
+func signalsFindings(sig Signals, target core.Target) []core.Finding {
+	var out []core.Finding
 	add := func(fp, detail string, confirmed bool) {
-		out = append(out, capkit.Finding{
+		out = append(out, core.Finding{
 			Target: target, Kind: "privesc", Fingerprint: fp, Confirmed: confirmed,
 			Evidence: []string{detail}, Source: kitName,
 		})
@@ -386,8 +386,8 @@ func signalsFindings(sig Signals, target capkit.Target) []capkit.Finding {
 
 // candidateFindings mirrors advise candidates as non-confirmed findings so the
 // conclusion is also visible in Findings, not only in Next.
-func candidateFindings(steps []capkit.NextStep, target capkit.Target) []capkit.Finding {
-	out := make([]capkit.Finding, 0, len(steps))
+func candidateFindings(steps []core.NextStep, target core.Target) []core.Finding {
+	out := make([]core.Finding, 0, len(steps))
 	for _, st := range steps {
 		var p map[string]any
 		_ = json.Unmarshal(st.Params, &p)
@@ -396,7 +396,7 @@ func candidateFindings(steps []capkit.NextStep, target capkit.Target) []capkit.F
 		if exploit == "" {
 			exploit, _ = p["vector"].(string)
 		}
-		out = append(out, capkit.Finding{
+		out = append(out, core.Finding{
 			Target: target, Kind: "privesc", Fingerprint: "privesc|candidate|" + key,
 			Confirmed: false, Payload: exploit, Evidence: []string{st.Reason}, Source: kitName,
 		})
@@ -404,13 +404,13 @@ func candidateFindings(steps []capkit.NextStep, target capkit.Target) []capkit.F
 	return out
 }
 
-func sessionTarget(info capkit.SessionInfo, projectID int64) capkit.Target {
-	return capkit.Target{
-		ProjectID: projectID, Kind: capkit.TargetHost, Host: strings.ToLower(hostOrID(info)),
+func sessionTarget(info core.SessionInfo, projectID int64) core.Target {
+	return core.Target{
+		ProjectID: projectID, Kind: core.TargetHost, Host: strings.ToLower(hostOrID(info)),
 	}
 }
 
-func hostOrID(info capkit.SessionInfo) string {
+func hostOrID(info core.SessionInfo) string {
 	if h := strings.TrimSpace(info.Host); h != "" {
 		return h
 	}

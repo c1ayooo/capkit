@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // ---- Manager ----
@@ -28,9 +28,9 @@ import (
 // tracks live sessions by ID and hands out Sessions to callers.
 type Manager struct {
 	mu       sync.RWMutex
-	openers  map[string]capkit.SessionOpener
-	sessions map[string]capkit.Session
-	info     map[string]capkit.SessionInfo
+	openers  map[string]core.SessionOpener
+	sessions map[string]core.Session
+	info     map[string]core.SessionInfo
 	newID    func(string) string
 	now      func() time.Time
 }
@@ -39,9 +39,9 @@ type Manager struct {
 // counter id, time.Now).
 func NewManager(idFn func(string) string, nowFn func() time.Time) *Manager {
 	m := &Manager{
-		openers:  map[string]capkit.SessionOpener{},
-		sessions: map[string]capkit.Session{},
-		info:     map[string]capkit.SessionInfo{},
+		openers:  map[string]core.SessionOpener{},
+		sessions: map[string]core.Session{},
+		info:     map[string]core.SessionInfo{},
 		newID:    idFn, now: nowFn,
 	}
 	if m.newID == nil {
@@ -61,7 +61,7 @@ func NewManager(idFn func(string) string, nowFn func() time.Time) *Manager {
 }
 
 // RegisterOpener installs an opener for a session kind.
-func (m *Manager) RegisterOpener(kind string, opener capkit.SessionOpener) {
+func (m *Manager) RegisterOpener(kind string, opener core.SessionOpener) {
 	if strings.TrimSpace(kind) == "" || opener == nil {
 		return
 	}
@@ -71,19 +71,19 @@ func (m *Manager) RegisterOpener(kind string, opener capkit.SessionOpener) {
 }
 
 // Open creates and tracks a session.
-func (m *Manager) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.SessionInfo, error) {
+func (m *Manager) Open(ctx context.Context, spec core.SessionSpec) (core.SessionInfo, error) {
 	kind := strings.ToLower(strings.TrimSpace(spec.Kind))
 	if kind == "" {
-		return capkit.SessionInfo{}, fmt.Errorf("kind 必填（ssh|winrm|smb|cli|webshell|...）")
+		return core.SessionInfo{}, fmt.Errorf("kind 必填（ssh|winrm|smb|cli|webshell|...）")
 	}
 	m.mu.RLock()
 	opener, ok := m.openers[kind]
 	m.mu.RUnlock()
 	if !ok {
-		return capkit.SessionInfo{}, fmt.Errorf("没有注册 %s 的 SessionOpener", kind)
+		return core.SessionInfo{}, fmt.Errorf("没有注册 %s 的 SessionOpener", kind)
 	}
 	if strings.TrimSpace(spec.Host) == "" {
-		return capkit.SessionInfo{}, fmt.Errorf("host 必填")
+		return core.SessionInfo{}, fmt.Errorf("host 必填")
 	}
 	if spec.Port == 0 {
 		spec.Port = defaultPort(kind)
@@ -96,7 +96,7 @@ func (m *Manager) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Ses
 
 	s, err := opener.Open(ctx, spec)
 	if err != nil {
-		return capkit.SessionInfo{}, err
+		return core.SessionInfo{}, err
 	}
 	info := s.Info()
 	if info.ID == "" {
@@ -122,7 +122,7 @@ func (m *Manager) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Ses
 }
 
 // Get returns a live session by ID.
-func (m *Manager) Get(id string) (capkit.Session, bool) {
+func (m *Manager) Get(id string) (core.Session, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s, ok := m.sessions[id]
@@ -130,9 +130,9 @@ func (m *Manager) Get(id string) (capkit.Session, bool) {
 }
 
 // List returns metadata for all live sessions, ordered by ID.
-func (m *Manager) List() []capkit.SessionInfo {
+func (m *Manager) List() []core.SessionInfo {
 	m.mu.RLock()
-	out := make([]capkit.SessionInfo, 0, len(m.info))
+	out := make([]core.SessionInfo, 0, len(m.info))
 	for _, i := range m.info {
 		out = append(out, i)
 	}
@@ -165,8 +165,8 @@ func (m *Manager) CloseAll() error {
 		ids = append(ids, id)
 	}
 	sessions := m.sessions
-	m.sessions = map[string]capkit.Session{}
-	m.info = map[string]capkit.SessionInfo{}
+	m.sessions = map[string]core.Session{}
+	m.info = map[string]core.SessionInfo{}
 	m.mu.Unlock()
 	var errs []error
 	for _, id := range ids {

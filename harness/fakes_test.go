@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // TestFakeHTTPAnswersFromRoutes pins the behaviour the contract test relies on:
@@ -16,14 +16,14 @@ func TestFakeHTTPAnswersFromRoutes(t *testing.T) {
 	h := NewHTTP(200, "fallback")
 	h.Routes = []Route{{Match: "/api/", Status: 201, Body: "routed"}}
 
-	res, err := h.Do(context.Background(), capkit.Request{Method: "GET", URL: "https://t.example/api/x"})
+	res, err := h.Do(context.Background(), core.Request{Method: "GET", URL: "https://t.example/api/x"})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
 	if res.Status != 201 || string(res.Body) != "routed" {
 		t.Fatalf("got %d %q, want 201 routed", res.Status, res.Body)
 	}
-	res, err = h.Fetch(context.Background(), capkit.Request{URL: "https://other.example/"})
+	res, err = h.Fetch(context.Background(), core.Request{URL: "https://other.example/"})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -48,14 +48,14 @@ func TestFakeHTTPQueueBeatsRoutes(t *testing.T) {
 	h.Routes = []Route{{Match: "/poll", Body: "routed"}}
 	h.Queue = []Route{{Body: "not-yet"}}
 
-	first, err := h.Do(context.Background(), capkit.Request{URL: "https://t.example/poll"})
+	first, err := h.Do(context.Background(), core.Request{URL: "https://t.example/poll"})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
 	if string(first.Body) != "not-yet" {
 		t.Fatalf("queued body = %q, want not-yet", first.Body)
 	}
-	second, err := h.Do(context.Background(), capkit.Request{URL: "https://t.example/poll"})
+	second, err := h.Do(context.Background(), core.Request{URL: "https://t.example/poll"})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
@@ -70,8 +70,8 @@ func TestFakeHTTPQueueBeatsRoutes(t *testing.T) {
 // TestFakeHTTPError covers the failure path a kit must turn into a Result.
 func TestFakeHTTPError(t *testing.T) {
 	h := NewHTTP(200, "")
-	h.Err = capkit.Unavailable("dns down")
-	if _, err := h.Do(context.Background(), capkit.Request{URL: "https://x/"}); err == nil {
+	h.Err = core.Unavailable("dns down")
+	if _, err := h.Do(context.Background(), core.Request{URL: "https://x/"}); err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -80,7 +80,7 @@ func TestFakeHTTPError(t *testing.T) {
 // stdout/exit code come back and the spec is recorded.
 func TestFakeProcessReturnsPreset(t *testing.T) {
 	p := &Process{Stdout: []byte("hello\n"), ExitCode: 3}
-	res, err := p.Run(context.Background(), capkit.ProcessSpec{Path: "/bin/echo", Args: []string{"hello"}})
+	res, err := p.Run(context.Background(), core.ProcessSpec{Path: "/bin/echo", Args: []string{"hello"}})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -94,10 +94,10 @@ func TestFakeProcessReturnsPreset(t *testing.T) {
 
 // TestFakeProcessHandler overrides the preset per spec.
 func TestFakeProcessHandler(t *testing.T) {
-	p := &Process{Handler: func(spec capkit.ProcessSpec) (*capkit.ProcessResult, error) {
-		return &capkit.ProcessResult{Stdout: []byte(spec.Path)}, nil
+	p := &Process{Handler: func(spec core.ProcessSpec) (*core.ProcessResult, error) {
+		return &core.ProcessResult{Stdout: []byte(spec.Path)}, nil
 	}}
-	res, _ := p.Run(context.Background(), capkit.ProcessSpec{Path: "/bin/x"})
+	res, _ := p.Run(context.Background(), core.ProcessSpec{Path: "/bin/x"})
 	if string(res.Stdout) != "/bin/x" {
 		t.Fatalf("stdout = %q", res.Stdout)
 	}
@@ -136,7 +136,7 @@ func TestFakeIDsAreDeterministic(t *testing.T) {
 // TestFakeAuditRecords pins the audit sink contract.
 func TestFakeAuditRecords(t *testing.T) {
 	a := &Audit{}
-	a.Record(context.Background(), capkit.AuditEvent{Tool: "http_probe", Phase: "start"})
+	a.Record(context.Background(), core.AuditEvent{Tool: "http_probe", Phase: "start"})
 	if events := a.Events(); len(events) != 1 || events[0].Tool != "http_probe" {
 		t.Fatalf("events = %+v", a.Events())
 	}
@@ -147,7 +147,7 @@ func TestFakeAuditRecords(t *testing.T) {
 // tool can send, without any vendor API being reached.
 func TestFakeCloudSignerStampsAndRecords(t *testing.T) {
 	s := &CloudSigner{Signature: "abc123"}
-	signed, err := s.SignRequest(capkit.Request{Method: "POST", URL: "https://ecs.aliyuncs.com/"}, "AKIDEXAMPLE", "secret", DefaultTime)
+	signed, err := s.SignRequest(core.Request{Method: "POST", URL: "https://ecs.aliyuncs.com/"}, "AKIDEXAMPLE", "secret", DefaultTime)
 	if err != nil {
 		t.Fatalf("SignRequest: %v", err)
 	}
@@ -165,10 +165,10 @@ func TestFakeCloudSignerStampsAndRecords(t *testing.T) {
 // the gate tests depend on.
 func TestFakeScopeFailsClosedOnDeniedHost(t *testing.T) {
 	s := &Scope{Denied: []string{"blocked.example"}}
-	if err := s.Check(context.Background(), capkit.Target{Kind: capkit.TargetURL, URL: "https://blocked.example/", Host: "blocked.example"}); err == nil {
+	if err := s.Check(context.Background(), core.Target{Kind: core.TargetURL, URL: "https://blocked.example/", Host: "blocked.example"}); err == nil {
 		t.Fatal("denied host must fail")
 	}
-	if err := s.Check(context.Background(), capkit.Target{Kind: capkit.TargetURL, URL: "https://ok.example/", Host: "ok.example"}); err != nil {
+	if err := s.Check(context.Background(), core.Target{Kind: core.TargetURL, URL: "https://ok.example/", Host: "ok.example"}); err != nil {
 		t.Fatalf("allowed host: %v", err)
 	}
 }
@@ -181,7 +181,7 @@ func TestFakeSessionsResolveByID(t *testing.T) {
 	if !ok {
 		t.Fatal("session not found")
 	}
-	out, err := s.Exec(context.Background(), "id", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "id", core.ExecOpts{})
 	if err != nil || out.Stdout == "" {
 		t.Fatalf("exec = %+v err=%v", out, err)
 	}
@@ -199,13 +199,13 @@ func TestDepsWiresEveryPort(t *testing.T) {
 		"settings", "sealer", "process", "artifact", "binary", "logger", "clock",
 		"ids", "fingerprints", "templates", "template_engines", "sessions",
 	} {
-		reg := capkit.NewRegistry()
-		err := reg.Add(capkit.Spec{
-			Manifest: capkit.Manifest{
+		reg := core.NewRegistry()
+		err := reg.Add(core.Spec{
+			Manifest: core.Manifest{
 				Name: "probe", Version: "v1", APIVersion: "v1", Requires: []string{name},
-				Tools: []capkit.ToolSpec{{Name: "probe_tool", Description: "probe", Risk: capkit.RiskLow}},
+				Tools: []core.ToolSpec{{Name: "probe_tool", Description: "probe", Risk: core.RiskLow}},
 			},
-			New: func(capkit.Deps) (capkit.Capability, error) { return nil, nil },
+			New: func(core.Deps) (core.Capability, error) { return nil, nil },
 		})
 		if err != nil {
 			t.Fatalf("add probe for %s: %v", name, err)

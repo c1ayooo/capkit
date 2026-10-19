@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // kitVersion is stamped into every Result envelope (mirrors the manifest).
@@ -17,23 +17,23 @@ const kitVersion = "0.1.0"
 // management, concurrency and JSONL parsing belong here; template indexing is
 // delegated to a TemplateCatalog implementation (wired by the host later).
 type Kit struct {
-	Processes capkit.ProcessRunner
-	Binaries  capkit.BinaryManager
-	Settings  capkit.Settings
-	Evidence  capkit.EvidenceSink
+	Processes core.ProcessRunner
+	Binaries  core.BinaryManager
+	Settings  core.Settings
+	Evidence  core.EvidenceSink
 }
 
-func New(deps capkit.Deps) *Kit {
+func New(deps core.Deps) *Kit {
 	return &Kit{Processes: deps.Processes, Binaries: deps.Binaries, Settings: deps.Settings, Evidence: deps.Evidence}
 }
 
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(deps), nil }
+func NewCapability(deps core.Deps) (core.Capability, error) { return New(deps), nil }
 
-func (k *Kit) Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func (k *Kit) Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "nucleikit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"scope", "limiter", "audit", "process", "binary"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "nuclei_scan",
 				Description: "Run nuclei against one or more in-scope targets and parse JSONL output. Execution is gated by scope, approval, rate limiting and audit at the runtime layer.",
@@ -48,24 +48,24 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["targets"]
 }`),
-				Risk:         capkit.RiskHigh,
+				Risk:         core.RiskHigh,
 				OutputSchema: json.RawMessage(`{"type":"object","properties":{"status":{"type":"integer"},"findings":{"type":"array","items":{"type":"object"}},"duration_ms":{"type":"integer"},"binary":{"type":"string"}}}`),
-				RateLimit:    capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
-				ExtractTargets: func(input json.RawMessage) ([]capkit.Target, error) {
+				RateLimit:    core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
+				ExtractTargets: func(input json.RawMessage) ([]core.Target, error) {
 					var in scanInput
 					if err := json.Unmarshal(input, &in); err != nil {
 						return nil, err
 					}
-					return capkit.TargetsFromStrings(0, in.Targets)
+					return core.TargetsFromStrings(0, in.Targets)
 				},
 			},
 			{
 				Name:           "nuclei_status",
 				Description:    "Report the managed nuclei binary status (version/path/updated_at).",
 				InputSchema:    json.RawMessage(`{"type":"object","properties":{}}`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"installed":{"type":"boolean"},"version":{"type":"string"},"path":{"type":"string"}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			},
 		},
 	}
@@ -81,51 +81,51 @@ type scanInput struct {
 
 // Call is the envelope shell: it runs the tool and normalizes the Result so
 // every return path carries a valid Status, Meta.Tool and a clamped Summary.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
 // dispatch routes a call to its tool implementation, exactly as before.
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "nuclei_scan":
 		return k.scan(ctx, call)
 	case "nuclei_status":
 		return k.status(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (k *Kit) status(ctx context.Context, _ capkit.Call) (capkit.Result, error) {
+func (k *Kit) status(ctx context.Context, _ core.Call) (core.Result, error) {
 	if k.Binaries == nil {
-		return capkit.FailResult(capkit.Unavailable(
+		return core.FailResult(core.Unavailable(
 			"nuclei 状态不可用：binary manager is not configured")), nil
 	}
 	st, err := k.Binaries.Status(ctx, "nuclei")
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	state := "未安装"
 	if st.Installed {
 		state = "已安装"
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("nuclei 环境：%s，版本 %s，路径 %s",
+	res, _ := core.SuccessResult(fmt.Sprintf("nuclei 环境：%s，版本 %s，路径 %s",
 		state, orDash(st.Version), orDash(st.Path)), st)
 	return res, nil
 }
 
-func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) scan(ctx context.Context, call core.Call) (core.Result, error) {
 	var in scanInput
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if len(in.Targets) == 0 {
-		return capkit.FailResult(capkit.InvalidInput("targets is required")), nil
+		return core.FailResult(core.InvalidInput("targets is required")), nil
 	}
 	if k.Binaries == nil || k.Processes == nil {
-		return capkit.FailResult(capkit.Unavailable(
+		return core.FailResult(core.Unavailable(
 			"nuclei 扫描不可用：binary/process runner is not configured")), nil
 	}
 	version := "3.11.1"
@@ -136,16 +136,16 @@ func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 	}
 	path, _, err := k.Binaries.Ensure(ctx, "nuclei", version)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	timeout := time.Duration(in.TimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
 
-	targets, err := capkit.TargetsFromStrings(call.Context.ProjectID, in.Targets)
+	targets, err := core.TargetsFromStrings(call.Context.ProjectID, in.Targets)
 	if err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	var hits []any
 	var rawLines []string
@@ -160,17 +160,17 @@ func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 		if len(in.Severity) > 0 {
 			args = append(args, "-severity", strings.Join(in.Severity, ","))
 		}
-		proc, err := k.Processes.Run(ctx, capkit.ProcessSpec{
-			Path: path, Args: args, Timeout: timeout, Targets: []capkit.Target{targets[i]},
-			RateLimit: capkit.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
+		proc, err := k.Processes.Run(ctx, core.ProcessSpec{
+			Path: path, Args: args, Timeout: timeout, Targets: []core.Target{targets[i]},
+			RateLimit: core.RateLimitSpec{PerSecond: 5, Burst: 2, Concurrency: 1},
 		})
 		if err != nil {
-			return capkit.FailResult(err), nil
+			return core.FailResult(err), nil
 		}
 		rawLines = append(rawLines, string(proc.Stdout))
 		hits = append(hits, parseJSONL(proc.Stdout)...)
 		if proc.ExitCode != 0 {
-			return capkit.FailResult(capkit.NewError(capkit.CodeInternal,
+			return core.FailResult(core.NewError(core.CodeInternal,
 				fmt.Sprintf("对 %s 扫描失败：nuclei exited %d: %s",
 					raw, proc.ExitCode, truncate(string(proc.Stderr), 500)))), nil
 		}
@@ -190,9 +190,9 @@ func (k *Kit) scan(ctx context.Context, call capkit.Call) (capkit.Result, error)
 	}
 	summary := fmt.Sprintf("对 %s 执行 %s，命中 %d 项，其中严重 %d/高危 %d",
 		targetPhrase, tplPhrase, len(hits), critical, high)
-	result, _ := capkit.SuccessResult(summary, out)
+	result, _ := core.SuccessResult(summary, out)
 	if k.Evidence != nil {
-		id, err := k.Evidence.Record(ctx, capkit.Evidence{
+		id, err := k.Evidence.Record(ctx, core.Evidence{
 			Kind: "nuclei", Title: fmt.Sprintf("nuclei scan (%d targets)", len(in.Targets)),
 			Data: json.RawMessage(mustJSON(out)), CreatedAt: time.Now(),
 		})

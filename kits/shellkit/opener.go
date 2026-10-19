@@ -1,6 +1,6 @@
 // Package shellkit exposes the WebShell/C2 foothold as capkit session tools.
 // It owns no transport itself: the host injects a session.Executor for
-// WebShells and a capkit.SessionManager, and these tools drive them through the
+// WebShells and a core.SessionManager, and these tools drive them through the
 // same contract SSH and WinRM use.
 package shellkit
 
@@ -10,19 +10,19 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/shellkit/session"
 )
 
-// WebShellOpener adapts a host session.Executor into a capkit.SessionOpener
+// WebShellOpener adapts a host session.Executor into a core.SessionOpener
 // for kind "webshell". Shell parameters (cmd param, password, protocol) travel
 // in SessionSpec.Options so the tool input stays transport-neutral.
 type WebShellOpener struct {
 	Executor session.Executor
 }
 
-// Open builds a WebShell-backed capkit.Session.
-func (o *WebShellOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Session, error) {
+// Open builds a WebShell-backed core.Session.
+func (o *WebShellOpener) Open(_ context.Context, spec core.SessionSpec) (core.Session, error) {
 	if o.Executor == nil {
 		return nil, fmt.Errorf("WebShell Executor 未注入（宿主需提供 shellkit/session.Executor）")
 	}
@@ -46,14 +46,14 @@ func (o *WebShellOpener) Open(_ context.Context, spec capkit.SessionSpec) (capki
 	return &session.CapabilitySession{Shell: shell, Executor: o.Executor}, nil
 }
 
-func opt(spec capkit.SessionSpec, key string) string {
+func opt(spec core.SessionSpec, key string) string {
 	if spec.Options == nil {
 		return ""
 	}
 	return strings.TrimSpace(spec.Options[key])
 }
 
-func firstOpt(spec capkit.SessionSpec, key, fallback string) string {
+func firstOpt(spec core.SessionSpec, key, fallback string) string {
 	if v := opt(spec, key); v != "" {
 		return v
 	}

@@ -6,8 +6,8 @@ Five-engine space-mapping client ported from 4zrec/4zreco:
 - unified `SearchResponse` + per-engine field/row normalization
 - domain query syntax per engine (`domain="..."`, `domain:"..."`,
   `hostname:...`, `domain.suffix="..."`)
-- key lookup: injected resolver -> environment -> `capkit.Settings`
-- all HTTP through `capkit.Fetcher` (rate limit + audit; external scope)
+- key lookup: injected resolver -> environment -> `core.Settings`
+- all HTTP through `core.Fetcher` (rate limit + audit; external scope)
 
 Capability tools:
 
@@ -18,7 +18,7 @@ Capability tools:
 Host wiring:
 
 ```go
-kit := spacemapkit.NewClient(capkit.Deps{Fetcher: fetch})
+kit := spacemapkit.NewClient(core.Deps{Fetcher: fetch})
 kit.KeyResolver = func(provider string) string { return myVault.Key(provider) }
 rt, _ := runtime.New(runtime.Config{Fetcher: fetch, Settings: settings}, reg)
 ```

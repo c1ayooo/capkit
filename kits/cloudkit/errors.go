@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Reason is the normalized cloud failure, so an agent can tell "my key is
@@ -97,27 +97,27 @@ var hints = map[Reason]string{
 // §5.5.3). The enum stays small; the cloud-specific distinction travels in the
 // message and hint.
 var capkitCodes = map[Reason]string{
-	ReasonInvalidCredential:  capkit.CodeUpstreamError,
-	ReasonPermissionDenied:   capkit.CodeUpstreamError,
-	ReasonRegionInvalid:      capkit.CodeInvalidInput,
-	ReasonInstanceNotRunning: capkit.CodeConflict,
-	ReasonNotFound:           capkit.CodeNotFound,
-	ReasonThrottled:          capkit.CodeRateLimited,
-	ReasonTimeout:            capkit.CodeTimeout,
-	ReasonUnsupported:        capkit.CodeToolMissing,
-	ReasonUpstream:           capkit.CodeUpstreamError,
+	ReasonInvalidCredential:  core.CodeUpstreamError,
+	ReasonPermissionDenied:   core.CodeUpstreamError,
+	ReasonRegionInvalid:      core.CodeInvalidInput,
+	ReasonInstanceNotRunning: core.CodeConflict,
+	ReasonNotFound:           core.CodeNotFound,
+	ReasonThrottled:          core.CodeRateLimited,
+	ReasonTimeout:            core.CodeTimeout,
+	ReasonUnsupported:        core.CodeToolMissing,
+	ReasonUpstream:           core.CodeUpstreamError,
 }
 
 // AsCapkit renders the reason as a capkit error: a stable Code from the fixed
 // enum, a one-line agent-readable message carrying the masked AK, a Hint that
 // says how to fix the input, and the raw vendor code in Detail.
-func (e *Error) AsCapkit() *capkit.Error {
+func (e *Error) AsCapkit() *core.Error {
 	if e == nil {
 		return nil
 	}
 	code := capkitCodes[e.Reason]
 	if code == "" {
-		code = capkit.CodeUpstreamError
+		code = core.CodeUpstreamError
 	}
 	msg := e.Reason.Label()
 	if e.Provider != "" {
@@ -128,9 +128,9 @@ func (e *Error) AsCapkit() *capkit.Error {
 		msg += "）"
 	}
 	if e.Message != "" {
-		msg += "：" + capkit.Truncate(e.Message, 120)
+		msg += "：" + core.Truncate(e.Message, 120)
 	}
-	err := capkit.NewError(code, msg)
+	err := core.NewError(code, msg)
 	err.Hint = hints[e.Reason]
 	err.Detail = e.Provider + " " + e.Code
 	switch e.Reason {
@@ -141,8 +141,8 @@ func (e *Error) AsCapkit() *capkit.Error {
 }
 
 // AsResult wraps the failure in a Result envelope.
-func (e *Error) AsResult() capkit.Result {
-	return capkit.FailResult(e.AsCapkit())
+func (e *Error) AsResult() core.Result {
+	return core.FailResult(e.AsCapkit())
 }
 
 // reasonFor scans a vendor error code against a per-vendor code table, then
@@ -188,12 +188,12 @@ func maskAK(ak string) string {
 	return ak[:4] + "****" + ak[len(ak)-4:]
 }
 
-// asCapkitError unwraps err to a *capkit.Error when the failure came from
+// asCapkitError unwraps err to a *core.Error when the failure came from
 // capkit itself rather than the vendor: the host's HTTP port returns
 // scope_denied / rate_limited / timeout atoms, and those must survive to the
 // agent instead of being reclassified as an upstream cloud failure.
-func asCapkitError(err error) *capkit.Error {
-	var ce *capkit.Error
+func asCapkitError(err error) *core.Error {
+	var ce *core.Error
 	if errors.As(err, &ce) {
 		return ce
 	}
@@ -236,8 +236,8 @@ func notFound(provider, what string) *Error {
 
 // invalidInput builds a bad_input failure for a request the vendor API cannot
 // express (missing region, missing bucket, ...).
-func invalidInput(provider, message string) *capkit.Error {
-	e := capkit.InvalidInput(message)
+func invalidInput(provider, message string) *core.Error {
+	e := core.InvalidInput(message)
 	if provider != "" {
 		e.Detail = provider
 	}
@@ -245,9 +245,9 @@ func invalidInput(provider, message string) *capkit.Error {
 }
 
 // requireAK is the precondition every tool shares.
-func requireAK(provider, ak, sk string) *capkit.Error {
+func requireAK(provider, ak, sk string) *core.Error {
 	if strings.TrimSpace(ak) == "" || strings.TrimSpace(sk) == "" {
-		e := capkit.InvalidInput("access_key 与 secret_key 必填")
+		e := core.InvalidInput("access_key 与 secret_key 必填")
 		e.Detail = provider
 		return e
 	}

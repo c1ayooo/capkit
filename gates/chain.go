@@ -8,21 +8,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Chain is the mandatory gate sequence around every capability call:
 // scope -> approval -> rate limit -> audit. It is not optional; the runtime
 // always routes calls through it.
 type Chain struct {
-	Scope             capkit.ScopeChecker
-	Approval          capkit.Approver
-	Limiter           capkit.Limiter
-	Audit             capkit.AuditSink
+	Scope             core.ScopeChecker
+	Approval          core.Approver
+	Limiter           core.Limiter
+	Audit             core.AuditSink
 	Redactor          Redactor
-	RequireApprovalAt capkit.Risk
-	Clock             capkit.Clock
-	IDs               capkit.IDGenerator
+	RequireApprovalAt core.Risk
+	Clock             core.Clock
+	IDs               core.IDGenerator
 }
 
 func (c *Chain) now() time.Time {
@@ -32,9 +32,9 @@ func (c *Chain) now() time.Time {
 	return time.Now()
 }
 
-func (c *Chain) threshold() capkit.Risk {
+func (c *Chain) threshold() core.Risk {
 	if c.RequireApprovalAt == "" {
-		return capkit.RiskHigh
+		return core.RiskHigh
 	}
 	return c.RequireApprovalAt
 }
@@ -54,9 +54,9 @@ func GateTraceFrom(ctx context.Context) []string {
 // Before validates targets, obtains approval and rate slots, and writes the
 // start audit event. The returned finish function is idempotent and must be
 // called by the runtime (typically deferred).
-func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec, call capkit.Call) (context.Context, func(capkit.Result, error), error) {
+func (c *Chain) Before(ctx context.Context, capName string, spec core.ToolSpec, call core.Call) (context.Context, func(core.Result, error), error) {
 	started := c.now()
-	cc, _ := capkit.CallContextFrom(ctx)
+	cc, _ := core.CallContextFrom(ctx)
 	if cc.TraceID == "" {
 		if c.IDs != nil {
 			cc.TraceID = c.IDs.New("trace")
@@ -64,19 +64,19 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 			cc.TraceID = fmt.Sprintf("trace-%d", started.UnixNano())
 		}
 	}
-	ctx = capkit.WithCallContext(ctx, cc)
+	ctx = core.WithCallContext(ctx, cc)
 
 	var trace []string
 	mark := func(stage string, since time.Time) {
 		trace = append(trace, fmt.Sprintf("%s:%dms", stage, c.now().Sub(since).Milliseconds()))
 	}
 
-	var targets []capkit.Target
+	var targets []core.Target
 	if spec.ExtractTargets != nil {
 		var err error
 		targets, err = spec.ExtractTargets(call.Input)
 		if err != nil {
-			return ctx, nil, capkit.InvalidInput(err.Error())
+			return ctx, nil, core.InvalidInput(err.Error())
 		}
 	}
 	for i := range targets {
@@ -88,7 +88,7 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 	if len(targets) > 0 {
 		t0 := c.now()
 		if c.Scope == nil {
-			return ctx, nil, capkit.ScopeDenied("scope checker is not configured")
+			return ctx, nil, core.ScopeDenied("scope checker is not configured")
 		}
 		for _, target := range targets {
 			if err := c.Scope.Check(ctx, target); err != nil {
@@ -101,9 +101,9 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 	if spec.Risk.AtLeast(c.threshold()) {
 		t0 := c.now()
 		if c.Approval == nil {
-			return ctx, nil, capkit.NewError(capkit.CodeApprovalRequired, "approval gate is not configured")
+			return ctx, nil, core.NewError(core.CodeApprovalRequired, "approval gate is not configured")
 		}
-		if err := c.Approval.Require(ctx, capkit.ApprovalRequest{
+		if err := c.Approval.Require(ctx, core.ApprovalRequest{
 			Capability: capName, Tool: spec.Name, Risk: spec.Risk, Targets: targets,
 			Actor: cc.Actor, ProjectID: cc.ProjectID,
 		}); err != nil {
@@ -122,7 +122,7 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 		seen[key] = true
 		if c.Limiter == nil {
 			releaseAll(releases)
-			return ctx, nil, capkit.NewError(capkit.CodeRateLimited, "rate limiter is not configured")
+			return ctx, nil, core.NewError(core.CodeRateLimited, "rate limiter is not configured")
 		}
 		t0 := c.now()
 		release, err := c.Limiter.Acquire(ctx, key, spec.RateLimit)
@@ -141,7 +141,7 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 	auditInput := redactor.Redact(call.Input)
 	hash := sha256.Sum256(auditInput)
 	t0 := c.now()
-	startEvent := capkit.AuditEvent{
+	startEvent := core.AuditEvent{
 		TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
 		Capability: capName, Tool: spec.Name, Risk: spec.Risk, Targets: targets,
 		Phase: "start", InputHash: hex.EncodeToString(hash[:]), StartedAt: started,
@@ -153,7 +153,7 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 	ctx = context.WithValue(ctx, gateTraceKey{}, trace)
 
 	var once sync.Once
-	finish := func(res capkit.Result, callErr error) {
+	finish := func(res core.Result, callErr error) {
 		once.Do(func() {
 			releaseAll(releases)
 			finished := c.now()
@@ -167,7 +167,7 @@ func (c *Chain) Before(ctx context.Context, capName string, spec capkit.ToolSpec
 				errMsg = res.Error.Error()
 			}
 			if c.Audit != nil {
-				c.Audit.Record(ctx, capkit.AuditEvent{
+				c.Audit.Record(ctx, core.AuditEvent{
 					TraceID: cc.TraceID, Actor: cc.Actor, ProjectID: cc.ProjectID, TaskID: cc.TaskID,
 					Capability: capName, Tool: spec.Name, Risk: spec.Risk, Targets: targets,
 					Phase: "finish", Status: status, Error: errMsg, InputHash: startEvent.InputHash,

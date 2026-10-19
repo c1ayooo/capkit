@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // TestManifestToolNames locks the exact tool surface containerkit exports. The
@@ -79,12 +79,12 @@ func TestManifestRequiresAndRisk(t *testing.T) {
 	}
 	for _, tool := range m.Tools {
 		if tool.Name == "container_escape_plan" {
-			if tool.Risk != capkit.RiskLow {
+			if tool.Risk != core.RiskLow {
 				t.Errorf("%s: risk = %q, want low", tool.Name, tool.Risk)
 			}
 			continue
 		}
-		if !tool.Risk.AtLeast(capkit.RiskMedium) {
+		if !tool.Risk.AtLeast(core.RiskMedium) {
 			t.Errorf("%s: risk %q below medium", tool.Name, tool.Risk)
 		}
 	}

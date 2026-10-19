@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/exec"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"golang.org/x/crypto/ssh"
 )
@@ -21,33 +21,33 @@ import (
 // ---- fake session exercises the contract shape ----
 
 type fakeSession struct {
-	info   capkit.SessionInfo
+	info   core.SessionInfo
 	closed bool
 	last   string
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	f.last = cmd
-	return capkit.Output{Command: cmd, Stdout: "ok:" + cmd, ExitCode: 0}, nil
+	return core.Output{Command: cmd, Stdout: "ok:" + cmd, ExitCode: 0}, nil
 }
-func (f *fakeSession) Info() capkit.SessionInfo { return f.info }
-func (f *fakeSession) Close() error             { f.closed = true; return nil }
+func (f *fakeSession) Info() core.SessionInfo { return f.info }
+func (f *fakeSession) Close() error           { f.closed = true; return nil }
 
 type fakeOpener struct{ s *fakeSession }
 
-func (o fakeOpener) Open(context.Context, capkit.SessionSpec) (capkit.Session, error) {
+func (o fakeOpener) Open(context.Context, core.SessionSpec) (core.Session, error) {
 	return o.s, nil
 }
 
 // Compile-time proof that the manager satisfies the host port.
-var _ capkit.SessionManager = (*sessionkit.Manager)(nil)
+var _ core.SessionManager = (*sessionkit.Manager)(nil)
 
 func TestManagerOpenGetListClose(t *testing.T) {
 	m := sessionkit.NewManager(nil, nil)
-	s := &fakeSession{info: capkit.SessionInfo{ID: "s1", Kind: "fake", Host: "10.0.0.1"}}
+	s := &fakeSession{info: core.SessionInfo{ID: "s1", Kind: "fake", Host: "10.0.0.1"}}
 	m.RegisterOpener("fake", fakeOpener{s: s})
 
-	info, err := m.Open(context.Background(), capkit.SessionSpec{Kind: "fake", Host: "10.0.0.1"})
+	info, err := m.Open(context.Background(), core.SessionSpec{Kind: "fake", Host: "10.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestManagerOpenGetListClose(t *testing.T) {
 	if !ok {
 		t.Fatal("session not tracked")
 	}
-	out, err := got.Exec(context.Background(), "id", capkit.ExecOpts{})
+	out, err := got.Exec(context.Background(), "id", core.ExecOpts{})
 	if err != nil || !strings.Contains(out.Stdout, "id") {
 		t.Fatalf("exec = %+v, %v", out, err)
 	}
@@ -79,25 +79,25 @@ func TestManagerOpenGetListClose(t *testing.T) {
 
 func TestManagerUnknownKind(t *testing.T) {
 	m := sessionkit.NewManager(nil, nil)
-	if _, err := m.Open(context.Background(), capkit.SessionSpec{Kind: "winrm", Host: "h"}); err == nil {
+	if _, err := m.Open(context.Background(), core.SessionSpec{Kind: "winrm", Host: "h"}); err == nil {
 		t.Fatal("expected missing opener error")
 	}
-	if _, err := m.Open(context.Background(), capkit.SessionSpec{Kind: "", Host: "h"}); err == nil {
+	if _, err := m.Open(context.Background(), core.SessionSpec{Kind: "", Host: "h"}); err == nil {
 		t.Fatal("expected kind-required error")
 	}
-	if _, err := m.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: ""}); err == nil {
+	if _, err := m.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: ""}); err == nil {
 		t.Fatal("expected host-required error")
 	}
 }
 
 func TestManagerCloseAll(t *testing.T) {
 	m := sessionkit.NewManager(nil, nil)
-	a := &fakeSession{info: capkit.SessionInfo{ID: "a"}}
-	b := &fakeSession{info: capkit.SessionInfo{ID: "b"}}
+	a := &fakeSession{info: core.SessionInfo{ID: "a"}}
+	b := &fakeSession{info: core.SessionInfo{ID: "b"}}
 	m.RegisterOpener("x", fakeOpener{s: a})
 	m.RegisterOpener("y", fakeOpener{s: b})
-	_, _ = m.Open(context.Background(), capkit.SessionSpec{Kind: "x", Host: "h1"})
-	_, _ = m.Open(context.Background(), capkit.SessionSpec{Kind: "y", Host: "h2"})
+	_, _ = m.Open(context.Background(), core.SessionSpec{Kind: "x", Host: "h1"})
+	_, _ = m.Open(context.Background(), core.SessionSpec{Kind: "y", Host: "h2"})
 	if err := m.CloseAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestManagerCloseAll(t *testing.T) {
 
 func TestCLIOpenerRequiresRunner(t *testing.T) {
 	o := &sessionkit.CLIOpener{}
-	if _, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: "local"}); err == nil {
+	if _, err := o.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: "local"}); err == nil {
 		t.Fatal("a CLI opener with no process runner must fail closed")
 	}
 }
@@ -122,12 +122,12 @@ func TestCLISessionExec(t *testing.T) {
 	o := &sessionkit.CLIOpener{Runner: exec.NewLocal(nil)}
 	m := sessionkit.NewManager(nil, nil)
 	m.RegisterOpener("cli", o)
-	info, err := m.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: "local"})
+	info, err := m.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s, _ := m.Get(info.ID)
-	out, err := s.Exec(context.Background(), "echo sessionkit-ok", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "echo sessionkit-ok", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,11 +144,11 @@ func TestCLISessionExec(t *testing.T) {
 
 func TestCLISessionNonZeroExit(t *testing.T) {
 	o := &sessionkit.CLIOpener{Runner: exec.NewLocal(nil)}
-	s, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: "local"})
+	s, err := o.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.Exec(context.Background(), "exit 3", capkit.ExecOpts{})
+	out, err := s.Exec(context.Background(), "exit 3", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,22 +159,22 @@ func TestCLISessionNonZeroExit(t *testing.T) {
 
 func TestCLISessionAllowList(t *testing.T) {
 	o := &sessionkit.CLIOpener{Runner: exec.NewLocal(nil), AllowedCommands: []string{"echo"}}
-	s, _ := o.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: "local"})
-	if _, err := s.Exec(context.Background(), "id", capkit.ExecOpts{}); err == nil {
+	s, _ := o.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: "local"})
+	if _, err := s.Exec(context.Background(), "id", core.ExecOpts{}); err == nil {
 		t.Fatal("expected allowlist rejection")
 	}
-	if _, err := s.Exec(context.Background(), "echo hi", capkit.ExecOpts{}); err != nil {
+	if _, err := s.Exec(context.Background(), "echo hi", core.ExecOpts{}); err != nil {
 		t.Fatalf("allowed command rejected: %v", err)
 	}
-	if _, err := s.Exec(context.Background(), "  ", capkit.ExecOpts{}); err == nil {
+	if _, err := s.Exec(context.Background(), "  ", core.ExecOpts{}); err == nil {
 		t.Fatal("empty command must be rejected")
 	}
 }
 
 func TestCLISessionMaxOutput(t *testing.T) {
 	o := &sessionkit.CLIOpener{Runner: exec.NewLocal(nil)}
-	s, _ := o.Open(context.Background(), capkit.SessionSpec{Kind: "cli", Host: "local"})
-	out, err := s.Exec(context.Background(), "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", capkit.ExecOpts{MaxOutput: 8})
+	s, _ := o.Open(context.Background(), core.SessionSpec{Kind: "cli", Host: "local"})
+	out, err := s.Exec(context.Background(), "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", core.ExecOpts{MaxOutput: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestSSHSessionExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := m.Open(ctx, capkit.SessionSpec{Kind: "ssh", Host: host, Port: port, User: "u", Secret: "pw"})
+	info, err := m.Open(ctx, core.SessionSpec{Kind: "ssh", Host: host, Port: port, User: "u", Secret: "pw"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestSSHSessionExec(t *testing.T) {
 		t.Fatalf("info = %+v", info)
 	}
 	s, _ := m.Get(info.ID)
-	out, err := s.Exec(ctx, "whoami", capkit.ExecOpts{})
+	out, err := s.Exec(ctx, "whoami", core.ExecOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,14 +295,14 @@ func TestSSHSessionExec(t *testing.T) {
 	}
 
 	// Uploader capability is present on the SSH session.
-	up, ok := s.(capkit.Uploader)
+	up, ok := s.(core.Uploader)
 	if !ok {
 		t.Fatal("SSH session must implement Uploader")
 	}
 	if err := up.Upload(ctx, bytes.NewReader([]byte("data")), "/tmp/x"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	if _, ok := s.(capkit.Tunneler); !ok {
+	if _, ok := s.(core.Tunneler); !ok {
 		t.Fatal("SSH session must implement Tunneler")
 	}
 	_ = m.Close(info.ID)
@@ -319,7 +319,7 @@ func TestSSHBadPassword(t *testing.T) {
 
 	m := sessionkit.NewManager(nil, nil)
 	m.RegisterOpener("ssh", &sessionkit.SSHOwner{})
-	_, err = m.Open(context.Background(), capkit.SessionSpec{Kind: "ssh", Host: host, Port: port, User: "u", Secret: "wrong"})
+	_, err = m.Open(context.Background(), core.SessionSpec{Kind: "ssh", Host: host, Port: port, User: "u", Secret: "wrong"})
 	if err == nil {
 		t.Fatal("expected auth failure")
 	}
@@ -327,7 +327,7 @@ func TestSSHBadPassword(t *testing.T) {
 
 func TestSSHMissingSecret(t *testing.T) {
 	o := &sessionkit.SSHOwner{}
-	_, err := o.Open(context.Background(), capkit.SessionSpec{Kind: "ssh", Host: "127.0.0.1", Port: 1, User: "u"})
+	_, err := o.Open(context.Background(), core.SessionSpec{Kind: "ssh", Host: "127.0.0.1", Port: 1, User: "u"})
 	if err == nil || !strings.Contains(err.Error(), "密码或私钥") {
 		t.Fatalf("err = %v", err)
 	}

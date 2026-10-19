@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // emptyPhrases are the "nothing was said" summaries the contract forbids.
@@ -21,12 +21,12 @@ func assertInformative(t *testing.T, tool, summary string) {
 	if emptyPhrases[s] {
 		t.Fatalf("%s: Summary %q is an empty phrase", tool, summary)
 	}
-	if n := len([]rune(s)); n > capkit.MaxSummaryRunes {
+	if n := len([]rune(s)); n > core.MaxSummaryRunes {
 		t.Fatalf("%s: Summary is %d runes, over the limit", tool, n)
 	}
 }
 
-func assertValidData(t *testing.T, tool string, res capkit.Result) {
+func assertValidData(t *testing.T, tool string, res core.Result) {
 	t.Helper()
 	var v any
 	if err := json.Unmarshal(res.Data, &v); err != nil {
@@ -44,7 +44,7 @@ func TestEnvelopeSummaryAllTools(t *testing.T) {
 
 	domMgr := newFakeManager()
 	domMgr.add(&scriptedSession{
-		info: capkit.SessionInfo{ID: "d1", OS: "windows"},
+		info: core.SessionInfo{ID: "d1", OS: "windows"},
 		rules: []rule{
 			{match: "net user /domain", stdout: sampleNetUser},
 			{match: "net group /domain", stdout: sampleNetGroup},
@@ -55,7 +55,7 @@ func TestEnvelopeSummaryAllTools(t *testing.T) {
 
 	smbMgr := newFakeManager()
 	smbMgr.add(&scriptedSession{
-		info:  capkit.SessionInfo{ID: "x1", OS: "windows"},
+		info:  core.SessionInfo{ID: "x1", OS: "windows"},
 		rules: []rule{{match: "net view", stdout: sampleNetView}},
 	})
 
@@ -76,7 +76,7 @@ func TestEnvelopeSummaryAllTools(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
-			res, err := capWith(tc.mgr).Call(ctx, capkit.Call{Tool: tc.tool, Input: json.RawMessage(tc.input)})
+			res, err := capWith(tc.mgr).Call(ctx, core.Call{Tool: tc.tool, Input: json.RawMessage(tc.input)})
 			if err != nil {
 				t.Fatalf("Call err = %v", err)
 			}
@@ -105,13 +105,13 @@ func TestEnvelopeSummaryAllTools(t *testing.T) {
 func TestEnvelopeFailurePaths(t *testing.T) {
 	ctx := context.Background()
 
-	res, err := capWith(newFakeManager()).Call(ctx, capkit.Call{
+	res, err := capWith(newFakeManager()).Call(ctx, core.Call{
 		Tool: "inet_local_info", Input: json.RawMessage(`{"session_id":"nope"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("missing session = %q %+v", res.Status, res.Error)
 	}
 	if res.Meta.Tool != "inet_local_info" {
@@ -119,13 +119,13 @@ func TestEnvelopeFailurePaths(t *testing.T) {
 	}
 	assertInformative(t, "inet_local_info", res.Summary)
 
-	res, err = capWith(nil).Call(ctx, capkit.Call{
+	res, err = capWith(nil).Call(ctx, core.Call{
 		Tool: "inet_portscan", Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5"],"ports":"22"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeToolMissing {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("missing manager = %q %+v", res.Status, res.Error)
 	}
 	assertInformative(t, "inet_portscan", res.Summary)
@@ -138,19 +138,19 @@ func TestPortScanPartialAndFailureSummary(t *testing.T) {
 
 	partial := newFakeManager()
 	partial.add(&scriptedSession{
-		info: capkit.SessionInfo{ID: "s1", OS: "linux"},
+		info: core.SessionInfo{ID: "s1", OS: "linux"},
 		rules: []rule{
 			{match: "10.0.0.5", err: errors.New("boom")},
 			{match: "10.0.0.6", stdout: "OPEN 10.0.0.6 22\n"},
 		},
 	})
-	res, err := capWith(partial).Call(ctx, capkit.Call{
+	res, err := capWith(partial).Call(ctx, core.Call{
 		Tool: "inet_portscan", Input: json.RawMessage(`{"session_id":"s1","hosts":["10.0.0.5","10.0.0.6"],"ports":"22"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("status = %q, want partial (%s)", res.Status, res.Summary)
 	}
 	if !strings.Contains(res.Summary, "1/2 台主机命令失败") {
@@ -159,16 +159,16 @@ func TestPortScanPartialAndFailureSummary(t *testing.T) {
 
 	down := newFakeManager()
 	down.add(&scriptedSession{
-		info:  capkit.SessionInfo{ID: "s2", OS: "linux"},
+		info:  core.SessionInfo{ID: "s2", OS: "linux"},
 		rules: []rule{{match: "", err: errors.New("down")}},
 	})
-	res, err = capWith(down).Call(ctx, capkit.Call{
+	res, err = capWith(down).Call(ctx, core.Call{
 		Tool: "inet_portscan", Input: json.RawMessage(`{"session_id":"s2","hosts":["10.0.0.5"],"ports":"22"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil {
+	if res.Status != core.StatusFailed || res.Error == nil {
 		t.Fatalf("status = %q err=%+v", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "10.0.0.5") || !strings.Contains(res.Summary, "失败") {

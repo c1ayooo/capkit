@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Long-running work must not block the agent (docs §5.5.5: nuclei full scans,
@@ -23,12 +23,12 @@ const jobStatusTool = "job_status"
 
 const jobStatusSchema = `{"type":"object","properties":{"job_id":{"type":"string","description":"the id a previous async call returned"}},"required":["job_id"]}`
 
-func jobStatusSpec() capkit.ToolSpec {
-	return capkit.ToolSpec{
+func jobStatusSpec() core.ToolSpec {
+	return core.ToolSpec{
 		Name: jobStatusTool,
 		Description: "查询异步任务。任何工具调用带 \"async\": true 时不会阻塞，而是立刻返回 StatusPartial 与 Data 中的 JobRef(job_id/poll_after_ms)；" +
 			"之后用 job_status 轮询，running 时仍返回 partial，任务完成后返回该工具最终的完整信封（含它自己的 Status/Data/Findings/Error）。",
-		Risk:         capkit.RiskLow,
+		Risk:         core.RiskLow,
 		InputSchema:  json.RawMessage(jobStatusSchema),
 		OutputSchema: json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string"},"state":{"type":"string","enum":["running","done","failed"]},"poll_after_ms":{"type":"integer"},"tool":{"type":"string"}}}`),
 	}
@@ -41,7 +41,7 @@ type jobRecord struct {
 	started    time.Time
 	finishedAt time.Time
 	done       bool
-	res        capkit.Result
+	res        core.Result
 	err        error
 }
 
@@ -87,7 +87,7 @@ func (r *jobRegistry) start(id, tool string) *jobRecord {
 	return rec
 }
 
-func (r *jobRegistry) finish(id string, res capkit.Result, err error) {
+func (r *jobRegistry) finish(id string, res core.Result, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec, ok := r.jobs[id]; ok {
@@ -134,12 +134,12 @@ func asyncRequested(input json.RawMessage) bool {
 
 // jobRefResult is the envelope an accepted async call returns: partial, with the
 // JobRef in Data and a Next step pointing at job_status (§5.5.5).
-func jobRefResult(tool, id string, pollMS int) capkit.Result {
-	res := capkit.NewResult(capkit.StatusPartial, "")
-	res.Summary = capkit.ClampSummary(fmt.Sprintf("%s 已转入后台执行（job_id=%s），请用 job_status 轮询", tool, id))
+func jobRefResult(tool, id string, pollMS int) core.Result {
+	res := core.NewResult(core.StatusPartial, "")
+	res.Summary = core.ClampSummary(fmt.Sprintf("%s 已转入后台执行（job_id=%s），请用 job_status 轮询", tool, id))
 	res.Data, _ = json.Marshal(map[string]any{"job_id": id, "poll_after_ms": pollMS, "tool": tool})
-	res.Next = []capkit.NextStep{{
-		Tool: jobStatusTool, Reason: "等待后台任务完成", Risk: capkit.RiskLow,
+	res.Next = []core.NextStep{{
+		Tool: jobStatusTool, Reason: "等待后台任务完成", Risk: core.RiskLow,
 		Params: json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, id)),
 	}}
 	return res
@@ -148,29 +148,29 @@ func jobRefResult(tool, id string, pollMS int) capkit.Result {
 // jobStatus handles the polling tool. A running job keeps returning partial; a
 // finished job returns the envelope the tool itself produced, so the agent sees
 // the real findings/evidence/error rather than a re-summary of them.
-func (r *Runtime) jobStatus(input json.RawMessage) capkit.Result {
+func (r *Runtime) jobStatus(input json.RawMessage) core.Result {
 	var in struct {
 		JobID string `json:"job_id"`
 	}
 	if err := json.Unmarshal(input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error()))
+		return core.FailResult(core.InvalidInput(err.Error()))
 	}
 	if in.JobID == "" {
-		return capkit.FailResult(capkit.InvalidInput("job_id 必填"))
+		return core.FailResult(core.InvalidInput("job_id 必填"))
 	}
 	rec, ok := r.jobs.get(in.JobID)
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("任务不存在或已过期: " + in.JobID))
+		return core.FailResult(core.NotFound("任务不存在或已过期: " + in.JobID))
 	}
 	if !rec.done {
-		res := capkit.NewResult(capkit.StatusPartial, "")
-		res.Summary = capkit.ClampSummary(rec.tool + " 仍在后台执行（job_id=" + rec.id + "）")
+		res := core.NewResult(core.StatusPartial, "")
+		res.Summary = core.ClampSummary(rec.tool + " 仍在后台执行（job_id=" + rec.id + "）")
 		res.Data, _ = json.Marshal(map[string]any{
 			"job_id": rec.id, "state": "running", "tool": rec.tool,
 			"elapsed_ms": r.now().Sub(rec.started).Milliseconds(), "poll_after_ms": 2000,
 		})
-		res.Next = []capkit.NextStep{{
-			Tool: jobStatusTool, Reason: "继续轮询直到任务结束", Risk: capkit.RiskLow,
+		res.Next = []core.NextStep{{
+			Tool: jobStatusTool, Reason: "继续轮询直到任务结束", Risk: core.RiskLow,
 			Params: json.RawMessage(fmt.Sprintf(`{"job_id":%q}`, rec.id)),
 		}}
 		return res
@@ -182,7 +182,7 @@ func (r *Runtime) jobStatus(input json.RawMessage) capkit.Result {
 // the caller's cancellation (context.WithoutCancel) so an HTTP timeout does not
 // kill accepted work, while keeping the call context, gate trace and request
 // counter alive for the tool.
-func (r *Runtime) runAsync(ctx context.Context, rec *jobRecord, cap capkit.Capability, tool, version string, input json.RawMessage, cc capkit.CallContext, finish func(capkit.Result, error)) {
+func (r *Runtime) runAsync(ctx context.Context, rec *jobRecord, cap core.Capability, tool, version string, input json.RawMessage, cc core.CallContext, finish func(core.Result, error)) {
 	go func() {
 		jobCtx := withRequestCounter(context.WithoutCancel(ctx))
 		if r.jobTimeout > 0 {
@@ -190,9 +190,9 @@ func (r *Runtime) runAsync(ctx context.Context, rec *jobRecord, cap capkit.Capab
 			jobCtx, cancel = context.WithTimeout(jobCtx, r.jobTimeout)
 			defer cancel()
 		}
-		res, err := cap.Call(jobCtx, capkit.Call{Tool: tool, Input: input, Context: cc})
+		res, err := cap.Call(jobCtx, core.Call{Tool: tool, Input: input, Context: cc})
 		if err != nil {
-			res = capkit.FailResult(err)
+			res = core.FailResult(err)
 		}
 		res = r.finalize(jobCtx, res, tool, version, cc, r.now())
 		r.jobs.finish(rec.id, res, err)

@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // This file is the seam the brief calls out: every vendor SDK must send through
-// the injected capkit.HTTPDoer so the host's scope check, rate limit and audit
+// the injected core.HTTPDoer so the host's scope check, rate limit and audit
 // cannot be bypassed by a kit-owned client.
 //
 // Each SDK wants a slightly different shape, and all four are covered by the
@@ -26,10 +26,10 @@ import (
 // to the port: the port takes bytes, and every cloud request here is small.
 const maxRequestBody = 1 << 20
 
-// httpDoerClient adapts a capkit.HTTPDoer to net/http's RoundTripper and to the
+// httpDoerClient adapts a core.HTTPDoer to net/http's RoundTripper and to the
 // darabonba HttpClient interface.
 type httpDoerClient struct {
-	doer capkit.HTTPDoer
+	doer core.HTTPDoer
 	// timeout applies when the request carries no deadline of its own.
 	timeout time.Duration
 }
@@ -37,7 +37,7 @@ type httpDoerClient struct {
 // newHTTPDoerClient wraps a doer. A nil doer is not an error here: the kit
 // reports "unavailable" when a tool actually needs it, so a host that never
 // calls a cloud tool does not have to wire one.
-func newHTTPDoerClient(doer capkit.HTTPDoer, timeout time.Duration) *httpDoerClient {
+func newHTTPDoerClient(doer core.HTTPDoer, timeout time.Duration) *httpDoerClient {
 	return &httpDoerClient{doer: doer, timeout: timeout}
 }
 
@@ -46,17 +46,17 @@ func newHTTPDoerClient(doer capkit.HTTPDoer, timeout time.Duration) *httpDoerCli
 func (c *httpDoerClient) client() *http.Client { return &http.Client{Transport: c} }
 
 // RoundTrip implements http.RoundTripper: it converts the SDK's request into a
-// capkit.Request, calls the port, and rebuilds an *http.Response body for the
+// core.Request, calls the port, and rebuilds an *http.Response body for the
 // SDK to parse.
 func (c *httpDoerClient) RoundTrip(req *http.Request) (*http.Response, error) {
 	if c.doer == nil {
-		return nil, capkit.Unavailable("cloudkit: HTTPDoer 未注入，无法发起云 API 调用")
+		return nil, core.Unavailable("cloudkit: HTTPDoer 未注入，无法发起云 API 调用")
 	}
 	var body []byte
 	if req.Body != nil {
 		b, err := io.ReadAll(io.LimitReader(req.Body, maxRequestBody))
 		if err != nil {
-			return nil, capkit.InvalidInput("cloudkit: 读取请求体失败: " + err.Error())
+			return nil, core.InvalidInput("cloudkit: 读取请求体失败: " + err.Error())
 		}
 		_ = req.Body.Close()
 		body = b
@@ -70,7 +70,7 @@ func (c *httpDoerClient) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Host != "" {
 		headers["Host"] = req.Host
 	}
-	res, err := c.doer.Do(req.Context(), capkit.Request{
+	res, err := c.doer.Do(req.Context(), core.Request{
 		Method:  req.Method,
 		URL:     req.URL.String(),
 		Headers: headers,
@@ -93,7 +93,7 @@ func (c *httpDoerClient) Call(req *http.Request, _ *http.Transport) (*http.Respo
 }
 
 // responseFor rebuilds the SDK's view of the response from the port's bytes.
-func responseFor(req *http.Request, res *capkit.Response) *http.Response {
+func responseFor(req *http.Request, res *core.Response) *http.Response {
 	status := res.Status
 	if status == 0 {
 		status = http.StatusBadGateway

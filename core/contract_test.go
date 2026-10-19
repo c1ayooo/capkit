@@ -1,4 +1,4 @@
-package capkit_test
+package core_test
 
 import (
 	"encoding/json"
@@ -7,19 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/all"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // registeredSpecs returns every tool spec across the full registry, so the
 // contract invariants are checked against real declarations, not fixtures.
-func registeredSpecs(t *testing.T) []capkit.ToolSpec {
+func registeredSpecs(t *testing.T) []core.ToolSpec {
 	t.Helper()
-	reg := capkit.NewRegistry()
+	reg := core.NewRegistry()
 	if err := all.RegisterFull(reg); err != nil {
 		t.Fatalf("RegisterFull: %v", err)
 	}
-	var out []capkit.ToolSpec
+	var out []core.ToolSpec
 	for _, spec := range reg.Specs() {
 		for _, tool := range spec.Manifest.Tools {
 			// give each tool a unique owner so duplicates surface as test failures
@@ -71,7 +71,7 @@ func TestEveryToolHasValidSchemas(t *testing.T) {
 // TestResultContractFilesExistAndParse verifies the published contract files.
 func TestResultContractFilesExistAndParse(t *testing.T) {
 	for _, name := range []string{"result.json", "output.json", "tool.json", "target.json"} {
-		path := filepath.Join("contracts", name)
+		path := filepath.Join("..", "contracts", name)
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -85,29 +85,29 @@ func TestResultContractFilesExistAndParse(t *testing.T) {
 
 // TestStatusForErrorMapping locks the code->status contract from §5.5.2/§5.5.3.
 func TestStatusForErrorMapping(t *testing.T) {
-	cases := map[string]capkit.Status{
-		capkit.CodeScopeDenied:         capkit.StatusBlocked,
-		capkit.CodeApprovalRequired:    capkit.StatusBlocked,
-		capkit.CodeRateLimited:         capkit.StatusBlocked,
-		capkit.CodeUnavailable:         capkit.StatusUnavailable,
-		capkit.CodeToolMissing:         capkit.StatusUnavailable,
-		capkit.CodeNeedHuman:           capkit.StatusNeedHuman,
-		capkit.CodeTargetUnreachable:   capkit.StatusFailed,
-		capkit.CodeTimeout:             capkit.StatusFailed,
-		capkit.CodeInvalidInput:        capkit.StatusFailed,
-		capkit.CodeInternal:            capkit.StatusFailed,
-		capkit.CodeEvidenceWriteFailed: capkit.StatusFailed,
+	cases := map[string]core.Status{
+		core.CodeScopeDenied:         core.StatusBlocked,
+		core.CodeApprovalRequired:    core.StatusBlocked,
+		core.CodeRateLimited:         core.StatusBlocked,
+		core.CodeUnavailable:         core.StatusUnavailable,
+		core.CodeToolMissing:         core.StatusUnavailable,
+		core.CodeNeedHuman:           core.StatusNeedHuman,
+		core.CodeTargetUnreachable:   core.StatusFailed,
+		core.CodeTimeout:             core.StatusFailed,
+		core.CodeInvalidInput:        core.StatusFailed,
+		core.CodeInternal:            core.StatusFailed,
+		core.CodeEvidenceWriteFailed: core.StatusFailed,
 	}
 	for code, want := range cases {
-		if got := capkit.StatusForError(capkit.NewError(code, "x")); got != want {
+		if got := core.StatusForError(core.NewError(code, "x")); got != want {
 			t.Errorf("StatusForError(%s) = %s, want %s", code, got, want)
 		}
 	}
 	// scope_denied must never be retryable: the agent must not loop on it.
-	if e := capkit.ScopeDenied("x"); e.Retryable {
+	if e := core.ScopeDenied("x"); e.Retryable {
 		t.Error("scope_denied must not be retryable")
 	}
-	if e := capkit.NewError(capkit.CodeApprovalRequired, "x"); e.Retryable {
+	if e := core.NewError(core.CodeApprovalRequired, "x"); e.Retryable {
 		t.Error("approval_required must not be retryable")
 	}
 }
@@ -115,22 +115,22 @@ func TestStatusForErrorMapping(t *testing.T) {
 // TestSummaryClamp keeps Summary within the agent-readable bound.
 func TestSummaryClamp(t *testing.T) {
 	long := strings.Repeat("测", 500)
-	got := capkit.ClampSummary(long)
-	if len([]rune(got)) > capkit.MaxSummaryRunes {
+	got := core.ClampSummary(long)
+	if len([]rune(got)) > core.MaxSummaryRunes {
 		t.Fatalf("clamped summary = %d runes", len([]rune(got)))
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("clamped summary should end with ellipsis: %q", got)
 	}
-	if capkit.ClampSummary("short") != "short" {
+	if core.ClampSummary("short") != "short" {
 		t.Fatal("short summary must pass through unchanged")
 	}
 }
 
 // TestFailResultCarriesStatus ensures error atoms map to the right status.
 func TestFailResultCarriesStatus(t *testing.T) {
-	res := capkit.FailResult(capkit.ScopeDenied("out of scope"))
-	if res.Status != capkit.StatusBlocked || res.OK {
+	res := core.FailResult(core.ScopeDenied("out of scope"))
+	if res.Status != core.StatusBlocked || res.OK {
 		t.Fatalf("status/ok = %s/%v", res.Status, res.OK)
 	}
 	if res.Summary == "" || res.Error == nil {
@@ -144,15 +144,15 @@ func TestFailResultCarriesStatus(t *testing.T) {
 func TestNormalizeStampsEveryReturnPath(t *testing.T) {
 	cases := []struct {
 		name       string
-		in         capkit.Result
-		wantStatus capkit.Status
+		in         core.Result
+		wantStatus core.Status
 		wantOK     bool
 	}{
-		{"zero value fails closed", capkit.Result{}, capkit.StatusFailed, false},
-		{"legacy ok only", capkit.Result{OK: true}, capkit.StatusSuccess, true},
-		{"error drives status", capkit.Result{Error: capkit.ScopeDenied("x")}, capkit.StatusBlocked, false},
-		{"explicit status wins", capkit.Result{OK: true, Status: capkit.StatusPartial}, capkit.StatusPartial, true},
-		{"stale ok is corrected", capkit.Result{OK: true, Error: capkit.Unavailable("x")}, capkit.StatusUnavailable, false},
+		{"zero value fails closed", core.Result{}, core.StatusFailed, false},
+		{"legacy ok only", core.Result{OK: true}, core.StatusSuccess, true},
+		{"error drives status", core.Result{Error: core.ScopeDenied("x")}, core.StatusBlocked, false},
+		{"explicit status wins", core.Result{OK: true, Status: core.StatusPartial}, core.StatusPartial, true},
+		{"stale ok is corrected", core.Result{OK: true, Error: core.Unavailable("x")}, core.StatusUnavailable, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -167,7 +167,7 @@ func TestNormalizeStampsEveryReturnPath(t *testing.T) {
 	}
 	// A call that already named its tool keeps that name (the runtime's
 	// back-fill must never overwrite a kit that got there first).
-	kept := capkit.Result{Meta: capkit.Meta{Tool: "other"}}.Normalize("http_probe", "v")
+	kept := core.Result{Meta: core.Meta{Tool: "other"}}.Normalize("http_probe", "v")
 	if kept.Meta.Tool != "other" {
 		t.Fatalf("existing Meta.Tool was overwritten: %+v", kept.Meta)
 	}

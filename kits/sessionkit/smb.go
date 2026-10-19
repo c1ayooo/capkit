@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // SMBOpener opens an SMB share session. SMB is not an HTTP protocol and capkit
@@ -23,7 +23,7 @@ import (
 // traffic.
 type SMBOpener struct {
 	// Runner is required.
-	Runner capkit.ProcessRunner
+	Runner core.ProcessRunner
 	// Binary overrides the smbclient path; default "smbclient".
 	Binary string
 	// Share is the share name when the session spec does not carry one in
@@ -31,26 +31,26 @@ type SMBOpener struct {
 	Share string
 	// Artifacts stages uploads locally (smbclient needs a real file path).
 	// Upload stays unavailable when it is nil.
-	Artifacts capkit.ArtifactStore
+	Artifacts core.ArtifactStore
 	// Timeout bounds one smbclient invocation; default 60s.
 	Timeout time.Duration
 }
 
 // Open records the target parameters. No traffic is issued, so this only fails
 // on a missing runner or an unusable host.
-func (o *SMBOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Session, error) {
+func (o *SMBOpener) Open(_ context.Context, spec core.SessionSpec) (core.Session, error) {
 	if o.Runner == nil {
-		return nil, capkit.Unavailable("SMB 需要 ProcessRunner 端口（subprocess 调 smbclient）")
+		return nil, core.Unavailable("SMB 需要 ProcessRunner 端口（subprocess 调 smbclient）")
 	}
 	host := hostFor(spec.Host)
 	if host == "" {
 		return nil, fmt.Errorf("SMB 会话需要 host")
 	}
-	share := capkit.FirstNonEmpty(optionsOf(spec)["share"], o.Share)
+	share := core.FirstNonEmpty(optionsOf(spec)["share"], o.Share)
 	if share == "" {
 		share = "C$"
 	}
-	binary := capkit.FirstNonEmpty(o.Binary, "smbclient")
+	binary := core.FirstNonEmpty(o.Binary, "smbclient")
 	timeout := o.Timeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -60,8 +60,8 @@ func (o *SMBOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Ses
 		unc:  "//" + host + "/" + share,
 		user: userSpec(spec.Domain, spec.User),
 		pass: spec.Secret,
-		info: capkit.SessionInfo{
-			Kind: "smb", Host: host, Port: capkit.FirstPositive(spec.Port, 445), User: spec.User,
+		info: core.SessionInfo{
+			Kind: "smb", Host: host, Port: core.FirstPositive(spec.Port, 445), User: spec.User,
 			Labels: spec.Labels,
 			Meta:   map[string]string{"unc": "//" + host + "/" + share, "transport": "smbclient"},
 		},
@@ -70,33 +70,33 @@ func (o *SMBOpener) Open(_ context.Context, spec capkit.SessionSpec) (capkit.Ses
 
 // SMBSession is an SMB share foothold driven through smbclient.
 type SMBSession struct {
-	runner    capkit.ProcessRunner
-	artifacts capkit.ArtifactStore
+	runner    core.ProcessRunner
+	artifacts core.ArtifactStore
 	binary    string
 	timeout   time.Duration
 	unc       string
 	user      string
 	pass      string
-	info      capkit.SessionInfo
+	info      core.SessionInfo
 }
 
-func (s *SMBSession) Info() capkit.SessionInfo { return s.info }
+func (s *SMBSession) Info() core.SessionInfo { return s.info }
 
 // Close is a no-op: smbclient connections live for one invocation.
 func (s *SMBSession) Close() error { return nil }
 
 // Exec runs one smbclient command list (e.g. "ls", "get a.txt b.txt").
-func (s *SMBSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts) (capkit.Output, error) {
+func (s *SMBSession) Exec(ctx context.Context, cmd string, opts core.ExecOpts) (core.Output, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return capkit.Output{}, fmt.Errorf("命令为空")
+		return core.Output{}, fmt.Errorf("命令为空")
 	}
 	started := time.Now()
 	res, err := s.run(ctx, cmd, opts.Timeout)
 	if err != nil {
-		return capkit.OutputFor(cmd, "", err.Error(), -1, time.Since(started), opts.MaxOutput), err
+		return core.OutputFor(cmd, "", err.Error(), -1, time.Since(started), opts.MaxOutput), err
 	}
-	return capkit.OutputFor(cmd, string(res.Stdout), string(res.Stderr), res.ExitCode, time.Since(started), opts.MaxOutput), nil
+	return core.OutputFor(cmd, string(res.Stdout), string(res.Stderr), res.ExitCode, time.Since(started), opts.MaxOutput), nil
 }
 
 // CanUpload reports whether uploads are possible (an ArtifactStore is wired).
@@ -106,7 +106,7 @@ func (s *SMBSession) CanUpload() bool { return s.artifacts != nil }
 // smbclient's put command.
 func (s *SMBSession) Upload(ctx context.Context, src io.Reader, remote string) error {
 	if s.artifacts == nil {
-		return capkit.ToolMissing("SMB 上传需要 ArtifactStore 暂存文件")
+		return core.ToolMissing("SMB 上传需要 ArtifactStore 暂存文件")
 	}
 	if strings.TrimSpace(remote) == "" {
 		return fmt.Errorf("remote 路径必填")
@@ -136,12 +136,12 @@ func (s *SMBSession) Download(ctx context.Context, remote string) (io.ReadCloser
 		return nil, err
 	}
 	if res.ExitCode != 0 {
-		return nil, capkit.UpstreamError("smbclient 读取失败: " + strings.TrimSpace(string(res.Stderr)))
+		return nil, core.UpstreamError("smbclient 读取失败: " + strings.TrimSpace(string(res.Stderr)))
 	}
 	return io.NopCloser(bytes.NewReader(res.Stdout)), nil
 }
 
-func (s *SMBSession) run(ctx context.Context, command string, timeout time.Duration) (*capkit.ProcessResult, error) {
+func (s *SMBSession) run(ctx context.Context, command string, timeout time.Duration) (*core.ProcessResult, error) {
 	if timeout <= 0 {
 		timeout = s.timeout
 	}
@@ -149,12 +149,12 @@ func (s *SMBSession) run(ctx context.Context, command string, timeout time.Durat
 	if s.user != "" {
 		args = append(args, "-U", s.user)
 	}
-	spec := capkit.ProcessSpec{
+	spec := core.ProcessSpec{
 		Path: s.binary, Args: args, Timeout: timeout,
 		// smbclient reaches the target host, so the runner must scope-check it
 		// exactly like any other target-touching subprocess.
-		Targets: []capkit.Target{{
-			Kind: capkit.TargetHost, Host: hostFor(s.info.Host), Port: s.info.Port,
+		Targets: []core.Target{{
+			Kind: core.TargetHost, Host: hostFor(s.info.Host), Port: s.info.Port,
 		}},
 	}
 	// The password rides in PASSWD so it stays out of argv.
@@ -164,7 +164,7 @@ func (s *SMBSession) run(ctx context.Context, command string, timeout time.Durat
 	return s.runner.Run(ctx, spec)
 }
 
-func optionsOf(spec capkit.SessionSpec) map[string]string {
+func optionsOf(spec core.SessionSpec) map[string]string {
 	if spec.Options == nil {
 		return map[string]string{}
 	}

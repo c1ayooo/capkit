@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // webClient is the shared outbound client for enterprise data sources. It
 // keeps browser-like headers and cookies, but every request goes through the
-// injected capkit.Fetcher (rate limit + audit, external scope).
+// injected core.Fetcher (rate limit + audit, external scope).
 type webClient struct {
 	base    string
-	fetcher capkit.Fetcher
+	fetcher core.Fetcher
 	proxy   string
 	timeout time.Duration
 	headers map[string]string
@@ -25,7 +25,7 @@ type webClient struct {
 
 const webBodyLimit = 4 << 20 // single response limit
 
-func newWebClient(fetcher capkit.Fetcher, base, proxy string, timeout time.Duration) (*webClient, error) {
+func newWebClient(fetcher core.Fetcher, base, proxy string, timeout time.Duration) (*webClient, error) {
 	if fetcher == nil {
 		return nil, fmt.Errorf("enterprisekit: Fetcher 未注入")
 	}
@@ -45,7 +45,7 @@ func newWebClient(fetcher capkit.Fetcher, base, proxy string, timeout time.Durat
 	}, nil
 }
 
-func (w *webClient) doRaw(ctx context.Context, method, path string, body io.Reader, isJSON bool, extra map[string]string) (*capkit.Response, error) {
+func (w *webClient) doRaw(ctx context.Context, method, path string, body io.Reader, isJSON bool, extra map[string]string) (*core.Response, error) {
 	if !strings.HasPrefix(path, "http") {
 		path = w.base + path
 	}
@@ -69,7 +69,7 @@ func (w *webClient) doRaw(ctx context.Context, method, path string, body io.Read
 	if isJSON {
 		headers["Content-Type"] = "application/json;charset=UTF-8"
 	}
-	resp, err := w.fetcher.Fetch(ctx, capkit.Request{
+	resp, err := w.fetcher.Fetch(ctx, core.Request{
 		Method: method, URL: path, Headers: headers, Body: data, Proxy: w.proxy, Timeout: w.timeout,
 	})
 	if err != nil {

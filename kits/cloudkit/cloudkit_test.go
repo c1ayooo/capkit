@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 )
 
@@ -19,13 +19,13 @@ import (
 // is a recording fake.
 func kitWith(t *testing.T, fake *harness.HTTP, ev *harness.Evidence) *Kit {
 	t.Helper()
-	return New(capkit.Deps{HTTP: fake, Evidence: ev, Clock: &harness.Clock{Now_: harness.DefaultTime}})
+	return New(core.Deps{HTTP: fake, Evidence: ev, Clock: &harness.Clock{Now_: harness.DefaultTime}})
 }
 
 // callTool invokes one tool the way an agent would and returns the envelope.
-func callTool(t *testing.T, k *Kit, tool string, input string) capkit.Result {
+func callTool(t *testing.T, k *Kit, tool string, input string) core.Result {
 	t.Helper()
-	res, err := k.Call(context.Background(), capkit.Call{Tool: tool, Input: json.RawMessage(input)})
+	res, err := k.Call(context.Background(), core.Call{Tool: tool, Input: json.RawMessage(input)})
 	if err != nil {
 		t.Fatalf("%s returned a transport error: %v", tool, err)
 	}
@@ -33,7 +33,7 @@ func callTool(t *testing.T, k *Kit, tool string, input string) capkit.Result {
 }
 
 // dataOf decodes the envelope's Data for field assertions.
-func dataOf(t *testing.T, res capkit.Result) map[string]any {
+func dataOf(t *testing.T, res core.Result) map[string]any {
 	t.Helper()
 	var out map[string]any
 	if err := json.Unmarshal(res.Data, &out); err != nil {
@@ -53,7 +53,7 @@ func TestKitVerifyMasksTheAK(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_ak_verify", verifyInputTemplate)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s, want success (error=%+v)", res.Status, res.Error)
 	}
 	if res.Meta.Tool != "cloud_ak_verify" || res.Meta.Version != kitVersion {
@@ -89,7 +89,7 @@ func TestKitVerifyFailureKeepsMaskAndReason(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_ak_verify", verifyInputTemplate)
-	if res.Status != capkit.StatusFailed {
+	if res.Status != core.StatusFailed {
 		t.Fatalf("Status = %s, want failed", res.Status)
 	}
 	if res.Error == nil {
@@ -100,8 +100,8 @@ func TestKitVerifyFailureKeepsMaskAndReason(t *testing.T) {
 	if !strings.Contains(res.Error.Message, ReasonInvalidCredential.Label()) {
 		t.Errorf("Error.Message %q does not say the credential is invalid", res.Error.Message)
 	}
-	if res.Error.Code != capkit.CodeUpstreamError {
-		t.Errorf("Error.Code = %s, want %s (invalid credential maps onto the enum, not a bug)", res.Error.Code, capkit.CodeUpstreamError)
+	if res.Error.Code != core.CodeUpstreamError {
+		t.Errorf("Error.Code = %s, want %s (invalid credential maps onto the enum, not a bug)", res.Error.Code, core.CodeUpstreamError)
 	}
 	// Not retryable: replaying a wrong key changes nothing, so the agent is
 	// nudged to fix the input rather than to try again.
@@ -130,15 +130,15 @@ func TestKitVerifyFailureKeepsMaskAndReason(t *testing.T) {
 // rewritten as a vendor failure, so the agent does not retry what it must not.
 func TestKitScopeDenialIsNotReclassified(t *testing.T) {
 	fake := harness.NewHTTP(200, awsCallerIdentityXML)
-	fake.Err = capkit.ScopeDenied("目标不在授权范围")
+	fake.Err = core.ScopeDenied("目标不在授权范围")
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_ak_verify", verifyInputTemplate)
-	if res.Status != capkit.StatusBlocked {
+	if res.Status != core.StatusBlocked {
 		t.Fatalf("Status = %s, want blocked", res.Status)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeScopeDenied {
-		t.Fatalf("Error = %+v, want code %s", res.Error, capkit.CodeScopeDenied)
+	if res.Error == nil || res.Error.Code != core.CodeScopeDenied {
+		t.Fatalf("Error = %+v, want code %s", res.Error, core.CodeScopeDenied)
 	}
 	if res.Error.Retryable {
 		t.Error("a scope denial must not be marked retryable")
@@ -148,14 +148,14 @@ func TestKitScopeDenialIsNotReclassified(t *testing.T) {
 // TestKitUnavailableWithoutDoer covers a host that registered cloudkit but
 // injected no HTTP port: the tools say so rather than dialing a vendor.
 func TestKitUnavailableWithoutDoer(t *testing.T) {
-	k := New(capkit.Deps{})
+	k := New(core.Deps{})
 	for _, tool := range []string{"cloud_ak_verify", "cloud_asset_list", "cloud_iam_list", "cloud_run_command", "cloud_storage_list"} {
 		res := callTool(t, k, tool, verifyInputTemplate)
-		if res.Status != capkit.StatusUnavailable {
+		if res.Status != core.StatusUnavailable {
 			t.Errorf("%s: Status = %s, want unavailable", tool, res.Status)
 		}
-		if res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
-			t.Errorf("%s: Error = %+v, want code %s", tool, res.Error, capkit.CodeUnavailable)
+		if res.Error == nil || res.Error.Code != core.CodeUnavailable {
+			t.Errorf("%s: Error = %+v, want code %s", tool, res.Error, core.CodeUnavailable)
 		}
 	}
 }
@@ -188,7 +188,7 @@ func TestKitInputGuards(t *testing.T) {
 				t.Fatalf("no Error: status=%s summary=%q", res.Status, res.Summary)
 			}
 			switch res.Status {
-			case capkit.StatusFailed, capkit.StatusBlocked, capkit.StatusNeedHuman:
+			case core.StatusFailed, core.StatusBlocked, core.StatusNeedHuman:
 			default:
 				t.Errorf("Status = %s, want a failure state", res.Status)
 			}
@@ -215,7 +215,7 @@ func TestKitListAssetsSummaryCounts(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_asset_list", verifyInputTemplate)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	// The Summary must state what was asked for, what came back, and the counts.
@@ -246,7 +246,7 @@ func TestKitListAssetsPartialKeepsData(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_asset_list", verifyInputTemplate)
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("Status = %s, want partial", res.Status)
 	}
 	if !res.OK {
@@ -270,7 +270,7 @@ func TestKitListAssetsEmpty(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_asset_list", verifyInputTemplate)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "未发现") {
@@ -295,7 +295,7 @@ func TestKitListIAMSummaryFlagsAdmins(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_iam_list", `{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "子用户 2 个") || !strings.Contains(res.Summary, "策略 2 条") {
@@ -310,7 +310,7 @@ func TestKitListIAMSummaryFlagsAdmins(t *testing.T) {
 	for _, next := range res.Next {
 		if next.Tool == "cloud_run_command" {
 			found = true
-			if next.Risk != capkit.RiskHigh {
+			if next.Risk != core.RiskHigh {
 				t.Errorf("cloud_run_command suggested at risk %s, want high", next.Risk)
 			}
 		}
@@ -338,7 +338,7 @@ func TestKitRunCommandLargeOutputGoesToEvidence(t *testing.T) {
 
 	res := callTool(t, k, "cloud_run_command",
 		`{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s","instance_id":"i-0aaa1111","command":"cat big.log"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "stdout "+itoa(maxCommandOutput+512)+" 字节") {
@@ -381,7 +381,7 @@ func TestKitRunCommandSmallOutputStaysInline(t *testing.T) {
 
 	res := callTool(t, k, "cloud_run_command",
 		`{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s","instance_id":"i-0aaa1111","command":"id"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if res.Truncated {
@@ -410,12 +410,12 @@ func TestKitRunCommandEvidenceFailureIsNotFatal(t *testing.T) {
 		Default: harness.Route{Status: 200, Body: `{"CommandId":"cmd-1","InstanceId":"i-1","Status":"Success","ResponseCode":0,"StandardOutputContent":"` + big + `","StandardErrorContent":""}`},
 		Queue:   []harness.Route{{Body: awsSendCommandJSON}},
 	}
-	ev := &harness.Evidence{Err: capkit.Unavailable("evidence store down")}
+	ev := &harness.Evidence{Err: core.Unavailable("evidence store down")}
 	k := kitWith(t, fake, ev)
 
 	res := callTool(t, k, "cloud_run_command",
 		`{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s","instance_id":"i-1","command":"id"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s, want success even when evidence could not be stored", res.Status)
 	}
 	if len(res.Evidence) != 0 {
@@ -426,8 +426,8 @@ func TestKitRunCommandEvidenceFailureIsNotFatal(t *testing.T) {
 // TestKitRunCommandIsHighRisk covers the manifest contract behind the approval
 // gate: the runtime only gate-checks what the manifest declares.
 func TestKitRunCommandIsHighRisk(t *testing.T) {
-	var spec *capkit.ToolSpec
-	manifest := New(capkit.Deps{}).Manifest()
+	var spec *core.ToolSpec
+	manifest := New(core.Deps{}).Manifest()
 	for i := range manifest.Tools {
 		if manifest.Tools[i].Name == "cloud_run_command" {
 			spec = &manifest.Tools[i]
@@ -436,7 +436,7 @@ func TestKitRunCommandIsHighRisk(t *testing.T) {
 	if spec == nil {
 		t.Fatal("cloud_run_command missing from the manifest")
 	}
-	if spec.Risk != capkit.RiskHigh {
+	if spec.Risk != core.RiskHigh {
 		t.Fatalf("cloud_run_command risk = %s, want high", spec.Risk)
 	}
 	if spec.RateLimit.PerSecond <= 0 {
@@ -470,7 +470,7 @@ func TestKitListStorageSummary(t *testing.T) {
 	k := kitWith(t, fake, nil)
 
 	res := callTool(t, k, "cloud_storage_list", `{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "对象存储桶 2 个") {
@@ -486,7 +486,7 @@ func TestKitListStorageObjectsSummary(t *testing.T) {
 
 	res := callTool(t, k, "cloud_storage_list",
 		`{"provider":"aws","access_key":"AKIAIOSFODNN7EXAMPLE","secret_key":"s","bucket":"my-bucket","prefix":"logs/"}`)
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("Status = %s (error=%+v)", res.Status, res.Error)
 	}
 	if !strings.Contains(res.Summary, "my-bucket") || !strings.Contains(res.Summary, "logs/") || !strings.Contains(res.Summary, "2 个对象") {
@@ -563,8 +563,8 @@ func TestPageSizeAndMaxResultsClamp(t *testing.T) {
 	if got := (callInput{}).pageSize(); got != defaultPageSize {
 		t.Errorf("pageSize(default) = %d", got)
 	}
-	if got := (callInput{PageSize: capkit.MaxListItems + 50}).pageSize(); got != capkit.MaxListItems {
-		t.Errorf("pageSize over the cap = %d, want %d", got, capkit.MaxListItems)
+	if got := (callInput{PageSize: core.MaxListItems + 50}).pageSize(); got != core.MaxListItems {
+		t.Errorf("pageSize over the cap = %d, want %d", got, core.MaxListItems)
 	}
 	if got := (callInput{MaxResults: 7}).maxResults(); got != 7 {
 		t.Errorf("maxResults = %d", got)
@@ -572,7 +572,7 @@ func TestPageSizeAndMaxResultsClamp(t *testing.T) {
 	if got := (callInput{MaxResults: -1}).maxResults(); got != defaultPageSize {
 		t.Errorf("maxResults(negative) = %d", got)
 	}
-	if got := (callInput{MaxResults: capkit.MaxListItems + 1}).maxResults(); got != capkit.MaxListItems {
+	if got := (callInput{MaxResults: core.MaxListItems + 1}).maxResults(); got != core.MaxListItems {
 		t.Errorf("maxResults over the cap = %d", got)
 	}
 }
@@ -580,7 +580,7 @@ func TestPageSizeAndMaxResultsClamp(t *testing.T) {
 // TestKitProviderMatrix covers the provider lookup and the four names in the
 // manifest enum, so a provider cannot be renamed out of the schema.
 func TestKitProviderMatrix(t *testing.T) {
-	k := New(capkit.Deps{HTTP: harness.NewHTTP(200, "")})
+	k := New(core.Deps{HTTP: harness.NewHTTP(200, "")})
 	for _, name := range []string{ProviderAliyun, ProviderTencent, ProviderAWS, ProviderHuawei} {
 		p, err := k.provider(name)
 		if err != nil {
@@ -626,14 +626,14 @@ func itoa(n int) string {
 func TestKitGateErrorsSurviveClassification(t *testing.T) {
 	cases := []struct {
 		name     string
-		portErr  *capkit.Error
-		status   capkit.Status
+		portErr  *core.Error
+		status   core.Status
 		wantCode string
 	}{
-		{"scope denied", capkit.ScopeDenied("目标不在授权范围"), capkit.StatusBlocked, capkit.CodeScopeDenied},
-		{"rate limited", capkit.NewError(capkit.CodeRateLimited, "请求频率超限"), capkit.StatusBlocked, capkit.CodeRateLimited},
-		{"port unavailable", capkit.Unavailable("HTTPDoer 不可用"), capkit.StatusUnavailable, capkit.CodeUnavailable},
-		{"timeout", capkit.Timeout("云 API 超时"), capkit.StatusFailed, capkit.CodeTimeout},
+		{"scope denied", core.ScopeDenied("目标不在授权范围"), core.StatusBlocked, core.CodeScopeDenied},
+		{"rate limited", core.NewError(core.CodeRateLimited, "请求频率超限"), core.StatusBlocked, core.CodeRateLimited},
+		{"port unavailable", core.Unavailable("HTTPDoer 不可用"), core.StatusUnavailable, core.CodeUnavailable},
+		{"timeout", core.Timeout("云 API 超时"), core.StatusFailed, core.CodeTimeout},
 	}
 	for _, tc := range cases {
 		for _, provider := range []string{ProviderAliyun, ProviderTencent, ProviderAWS, ProviderHuawei} {

@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 type fakeSession struct {
 	os    string
-	out   map[string]capkit.Output
+	out   map[string]core.Output
 	calls []string
 	fail  bool
 }
 
-func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (capkit.Output, error) {
+func (f *fakeSession) Exec(_ context.Context, cmd string, _ core.ExecOpts) (core.Output, error) {
 	f.calls = append(f.calls, cmd)
 	if f.fail {
-		return capkit.Output{}, context.DeadlineExceeded
+		return core.Output{}, context.DeadlineExceeded
 	}
 	for k, v := range f.out {
 		if strings.Contains(cmd, k) {
@@ -27,41 +27,41 @@ func (f *fakeSession) Exec(_ context.Context, cmd string, _ capkit.ExecOpts) (ca
 			return v, nil
 		}
 	}
-	return capkit.Output{Command: cmd}, nil
+	return core.Output{Command: cmd}, nil
 }
 
-func (f *fakeSession) Info() capkit.SessionInfo {
-	return capkit.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.5"}
+func (f *fakeSession) Info() core.SessionInfo {
+	return core.SessionInfo{ID: "s1", OS: f.os, Host: "10.0.0.5"}
 }
 func (f *fakeSession) Close() error { return nil }
 
-type fakeManager struct{ sess capkit.Session }
+type fakeManager struct{ sess core.Session }
 
-func (m *fakeManager) Open(context.Context, capkit.SessionSpec) (capkit.SessionInfo, error) {
-	return capkit.SessionInfo{}, nil
+func (m *fakeManager) Open(context.Context, core.SessionSpec) (core.SessionInfo, error) {
+	return core.SessionInfo{}, nil
 }
-func (m *fakeManager) Get(string) (capkit.Session, bool) {
+func (m *fakeManager) Get(string) (core.Session, bool) {
 	if m.sess == nil {
 		return nil, false
 	}
 	return m.sess, true
 }
-func (m *fakeManager) List() []capkit.SessionInfo { return nil }
-func (m *fakeManager) Close(string) error         { return nil }
+func (m *fakeManager) List() []core.SessionInfo { return nil }
+func (m *fakeManager) Close(string) error       { return nil }
 
-func newCap(t *testing.T, s capkit.Session) *Capability {
+func newCap(t *testing.T, s core.Session) *Capability {
 	t.Helper()
-	c, err := NewCapability(capkit.Deps{Sessions: &fakeManager{sess: s}})
+	c, err := NewCapability(core.Deps{Sessions: &fakeManager{sess: s}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c.(*Capability)
 }
 
-func call(t *testing.T, c *Capability, tool string, in any) capkit.Result {
+func call(t *testing.T, c *Capability, tool string, in any) core.Result {
 	t.Helper()
 	raw, _ := json.Marshal(in)
-	res, err := c.Call(context.Background(), capkit.Call{Tool: tool, Input: raw})
+	res, err := c.Call(context.Background(), core.Call{Tool: tool, Input: raw})
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -84,7 +84,7 @@ func TestManifestSchemas(t *testing.T) {
 			t.Errorf("%s: invalid risk", spec.Name)
 		}
 	}
-	if Manifest().Tools[1].Risk != capkit.RiskHigh {
+	if Manifest().Tools[1].Risk != core.RiskHigh {
 		t.Error("cleanup_apply must be high risk")
 	}
 }
@@ -92,21 +92,21 @@ func TestManifestSchemas(t *testing.T) {
 func TestUnknownTool(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "cleanup_bogus", map[string]any{"session_id": "s1"})
-	if res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("%+v", res.Error)
 	}
 }
 
 func TestMissingManagerFailsClosed(t *testing.T) {
-	c, _ := NewCapability(capkit.Deps{})
-	res, _ := c.(*Capability).Call(context.Background(), capkit.Call{Tool: "cleanup_preview", Input: json.RawMessage(`{"session_id":"x"}`)})
-	if res.Status != capkit.StatusUnavailable || res.Error.Code != capkit.CodeToolMissing {
+	c, _ := NewCapability(core.Deps{})
+	res, _ := c.(*Capability).Call(context.Background(), core.Call{Tool: "cleanup_preview", Input: json.RawMessage(`{"session_id":"x"}`)})
+	if res.Status != core.StatusUnavailable || res.Error.Code != core.CodeToolMissing {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 }
 
 func TestPreviewReturnsPlanID(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{
 		"grep -c": {Stdout: "3\n"},
 		"ls -la":  {Stdout: "file\n"},
 	}}
@@ -118,7 +118,7 @@ func TestPreviewReturnsPlanID(t *testing.T) {
 			{"kind": "file", "path": "/tmp/dropper.sh"},
 		},
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	var data struct {
@@ -155,13 +155,13 @@ func TestPreviewRejectsBlanketAndEmptyScope(t *testing.T) {
 		res := call(t, c, "cleanup_preview", map[string]any{
 			"session_id": "s1", "scope": []map[string]any{{"kind": "file", "path": path}},
 		})
-		if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+		if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 			t.Errorf("path %q: want invalid_input, got %+v", path, res.Error)
 		}
 	}
 	// empty scope
 	res := call(t, c, "cleanup_preview", map[string]any{"session_id": "s1"})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("empty scope: %+v", res.Error)
 	}
 }
@@ -171,7 +171,7 @@ func TestPreviewRequiresPatternForLogKinds(t *testing.T) {
 	res := call(t, c, "cleanup_preview", map[string]any{
 		"session_id": "s1", "scope": []map[string]any{{"kind": "log", "path": "/var/log/auth.log"}},
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("log without pattern should be rejected: %+v", res.Error)
 	}
 }
@@ -181,7 +181,7 @@ func TestPreviewPlatformKindMismatch(t *testing.T) {
 	res := call(t, c, "cleanup_preview", map[string]any{
 		"session_id": "s1", "scope": []map[string]any{{"kind": "eventlog", "path": "Security"}},
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("eventlog on linux should be rejected: %+v", res.Error)
 	}
 }
@@ -192,7 +192,7 @@ func TestApplyRequiresConfirm(t *testing.T) {
 		"session_id": "s1", "plan_id": "x", "confirm": false,
 		"scope": []map[string]any{{"kind": "file", "path": "/tmp/a"}},
 	})
-	if res.Status != capkit.StatusNeedHuman || res.Error.Code != capkit.CodeNeedHuman {
+	if res.Status != core.StatusNeedHuman || res.Error.Code != core.CodeNeedHuman {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 }
@@ -204,7 +204,7 @@ func TestApplyRejectsPlanIDMismatch(t *testing.T) {
 		"session_id": "s1", "plan_id": "deadbeef", "confirm": true,
 		"scope": []map[string]any{{"kind": "file", "path": "/tmp/a"}},
 	})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeConflict {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeConflict {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 }
@@ -227,13 +227,13 @@ func TestApplyRejectsScopeWideningAfterPreview(t *testing.T) {
 	res := call(t, c, "cleanup_apply", map[string]any{
 		"session_id": "s1", "plan_id": data.PlanID, "confirm": true, "scope": widened,
 	})
-	if res.Error == nil || res.Error.Code != capkit.CodeConflict {
+	if res.Error == nil || res.Error.Code != core.CodeConflict {
 		t.Fatalf("scope widening must be refused: status=%s err=%+v", res.Status, res.Error)
 	}
 }
 
 func TestApplyRunsWithMatchingPlanIDAndBacksUp(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{"cp -p": {ExitCode: 0}}}
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{"cp -p": {ExitCode: 0}}}
 	c := newCap(t, sess)
 	scope := []map[string]any{
 		{"kind": "log", "path": "/var/log/auth.log", "pattern": "10.0.0.9"},
@@ -249,7 +249,7 @@ func TestApplyRunsWithMatchingPlanIDAndBacksUp(t *testing.T) {
 	res := call(t, c, "cleanup_apply", map[string]any{
 		"session_id": "s1", "plan_id": data.PlanID, "confirm": true, "scope": scope,
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	joined := strings.Join(sess.calls, "\n")
@@ -262,7 +262,7 @@ func TestApplyRunsWithMatchingPlanIDAndBacksUp(t *testing.T) {
 }
 
 func TestApplyPartialOnFailure(t *testing.T) {
-	sess := &fakeSession{os: "linux", out: map[string]capkit.Output{"rm -f": {ExitCode: 1, Stderr: "denied"}}}
+	sess := &fakeSession{os: "linux", out: map[string]core.Output{"rm -f": {ExitCode: 1, Stderr: "denied"}}}
 	c := newCap(t, sess)
 	scope := []map[string]any{{"kind": "file", "path": "/tmp/a"}}
 	prev := call(t, c, "cleanup_preview", map[string]any{"session_id": "s1", "scope": scope})
@@ -273,7 +273,7 @@ func TestApplyPartialOnFailure(t *testing.T) {
 	res := call(t, c, "cleanup_apply", map[string]any{
 		"session_id": "s1", "plan_id": data.PlanID, "confirm": true, "scope": scope,
 	})
-	if res.Status != capkit.StatusPartial {
+	if res.Status != core.StatusPartial {
 		t.Fatalf("status=%s (want partial)", res.Status)
 	}
 }
@@ -291,7 +291,7 @@ func TestApplyNoBackupOption(t *testing.T) {
 	res := call(t, c, "cleanup_apply", map[string]any{
 		"session_id": "s1", "plan_id": data.PlanID, "confirm": true, "scope": scope, "backup": false,
 	})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s", res.Status)
 	}
 	for _, cmd := range sess.calls {
@@ -331,7 +331,7 @@ func TestPlanHashDeterministicAndOrderInsensitive(t *testing.T) {
 func TestPathsShorthandExpandsToFileScope(t *testing.T) {
 	c := newCap(t, &fakeSession{os: "linux"})
 	res := call(t, c, "cleanup_preview", map[string]any{"session_id": "s1", "paths": []string{"/tmp/a", "/tmp/b"}})
-	if res.Status != capkit.StatusSuccess {
+	if res.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", res.Status, res.Error)
 	}
 	var data struct {
@@ -344,10 +344,10 @@ func TestPathsShorthandExpandsToFileScope(t *testing.T) {
 }
 
 func TestWindowsEventLogPlan(t *testing.T) {
-	c := newCap(t, &fakeSession{os: "windows", out: map[string]capkit.Output{"wevtutil": {Stdout: "100\n"}}})
+	c := newCap(t, &fakeSession{os: "windows", out: map[string]core.Output{"wevtutil": {Stdout: "100\n"}}})
 	scope := []map[string]any{{"kind": "eventlog", "path": "Security"}}
 	prev := call(t, c, "cleanup_preview", map[string]any{"session_id": "s1", "scope": scope})
-	if prev.Status != capkit.StatusSuccess {
+	if prev.Status != core.StatusSuccess {
 		t.Fatalf("status=%s err=%+v", prev.Status, prev.Error)
 	}
 	var data struct {
@@ -386,7 +386,7 @@ func TestIsBlanket(t *testing.T) {
 }
 
 func TestDetectPlatform(t *testing.T) {
-	s := &fakeSession{os: "", out: map[string]capkit.Output{"uname -s": {Stdout: "Linux\n"}}}
+	s := &fakeSession{os: "", out: map[string]core.Output{"uname -s": {Stdout: "Linux\n"}}}
 	c := newCap(t, s)
 	if got := detectPlatform(context.Background(), c, s, 0); got != "linux" {
 		t.Fatalf("got %q", got)

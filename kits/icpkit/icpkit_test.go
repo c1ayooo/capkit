@@ -13,22 +13,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // fakeFetcher 按 URL 返回预置响应，模拟 beian 上游。
 type fakeFetcher struct {
 	responses map[string]string
-	calls     []capkit.Request
+	calls     []core.Request
 }
 
-func (f *fakeFetcher) Fetch(_ context.Context, req capkit.Request) (*capkit.Response, error) {
+func (f *fakeFetcher) Fetch(_ context.Context, req core.Request) (*core.Response, error) {
 	f.calls = append(f.calls, req)
 	body, ok := f.responses[req.URL]
 	if !ok {
 		body = `{}`
 	}
-	return &capkit.Response{Status: 200, Body: []byte(body)}, nil
+	return &core.Response{Status: 200, Body: []byte(body)}, nil
 }
 
 func (f *fakeFetcher) urls() []string {
@@ -50,12 +50,12 @@ func defaultFetcher() *fakeFetcher {
 }
 
 func TestManifestValidates(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	reg := capkit.NewRegistry()
-	if err := reg.Add(capkit.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	reg := core.NewRegistry()
+	if err := reg.Add(core.Spec{Manifest: kit.Manifest(), New: NewCapability}); err != nil {
 		t.Fatalf("registry.Add: %v", err)
 	}
-	if err := reg.Validate(capkit.Deps{Fetcher: defaultFetcher()}); err != nil {
+	if err := reg.Validate(core.Deps{Fetcher: defaultFetcher()}); err != nil {
 		t.Fatalf("registry.Validate: %v", err)
 	}
 	tools := kit.Manifest().Tools
@@ -73,15 +73,15 @@ func TestManifestValidates(t *testing.T) {
 }
 
 func TestNewCapabilityRequiresFetcher(t *testing.T) {
-	if _, err := NewCapability(capkit.Deps{}); err == nil {
+	if _, err := NewCapability(core.Deps{}); err == nil {
 		t.Fatal("缺少 fetcher 时 NewCapability 应报错")
 	}
 }
 
 func TestQueryWeb(t *testing.T) {
 	ff := defaultFetcher()
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, err := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, err := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"baidu.com","type":"web"}`),
 	})
@@ -110,8 +110,8 @@ func TestQueryWeb(t *testing.T) {
 func TestQueryBlacklistDomain(t *testing.T) {
 	ff := defaultFetcher()
 	ff.responses[blackByCondition] = `{"success":true,"code":200,"params":{"list":[{"domain":"evil.com"}]}}`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, err := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, err := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"evil.com","type":"bweb"}`),
 	})
@@ -130,8 +130,8 @@ func TestAppDetailFanout(t *testing.T) {
 		{"dataId":1002,"serviceType":6}
 	]}}`
 	ff.responses[appDetailEndpoint] = `{"success":true,"params":{"dataId":1001,"domain":"detail.example","appName":"X"}}`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, err := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, err := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"某App","type":"app"}`),
 	})
@@ -157,19 +157,19 @@ func TestAppDetailFanout(t *testing.T) {
 }
 
 func TestRejectsUnsupportedType(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	res, _ := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	res, _ := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"x","type":"nope"}`),
 	})
-	if res.OK || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.OK || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("非法类型应报 invalid_input: %+v", res)
 	}
 }
 
 func TestTypesTool(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "icp_types"})
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "icp_types"})
 	if err != nil || !res.OK {
 		t.Fatalf("icp_types 失败: err=%v res=%+v", err, res)
 	}
@@ -181,8 +181,8 @@ func TestTypesTool(t *testing.T) {
 func TestWAFBlockSurfacesError(t *testing.T) {
 	ff := defaultFetcher()
 	ff.responses[authEndpoint] = `<html>当前访问疑似黑客攻击</html>`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, _ := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"baidu.com"}`),
 	})
@@ -196,15 +196,15 @@ func TestWAFBlockSurfacesError(t *testing.T) {
 // TestQuerySummarySuccess 成功路径：Summary 必须点名目标、动作与关键结果，
 // Meta.Tool 必须等于工具名，且处于六态之内。
 func TestQuerySummarySuccess(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	res, err := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	res, err := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"baidu.com"}`),
 	})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if res.Status != capkit.StatusSuccess || !res.OK {
+	if res.Status != core.StatusSuccess || !res.OK {
 		t.Fatalf("status=%s ok=%v", res.Status, res.OK)
 	}
 	if res.Meta.Tool != "icp_query" || res.Meta.Version != kitVersion {
@@ -215,8 +215,8 @@ func TestQuerySummarySuccess(t *testing.T) {
 			t.Errorf("Summary %q 缺少 %q", res.Summary, want)
 		}
 	}
-	if len([]rune(res.Summary)) > capkit.MaxSummaryRunes {
-		t.Errorf("Summary 超过 %d rune: %q", capkit.MaxSummaryRunes, res.Summary)
+	if len([]rune(res.Summary)) > core.MaxSummaryRunes {
+		t.Errorf("Summary 超过 %d rune: %q", core.MaxSummaryRunes, res.Summary)
 	}
 }
 
@@ -226,8 +226,8 @@ func TestQuerySummaryWithLicence(t *testing.T) {
 	ff.responses[queryByCondition] = `{"success":true,"code":200,"params":{"list":[
 		{"unitName":"某某科技有限公司","serviceLicence":"京ICP备00000000号-1"}
 	]}}`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, _ := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"example.com"}`),
 	})
@@ -241,8 +241,8 @@ func TestQuerySummaryWithLicence(t *testing.T) {
 func TestQuerySummaryEmpty(t *testing.T) {
 	ff := defaultFetcher()
 	ff.responses[queryByCondition] = `{"success":true,"code":200,"params":{"total":0,"list":[]}}`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, _ := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"nonexistent.example"}`),
 	})
@@ -259,13 +259,13 @@ func TestQuerySummaryEmpty(t *testing.T) {
 
 // TestTypesSummary icp_types 的 Summary 必须说明实际返回了多少种类型。
 func TestTypesSummary(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "icp_types"})
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "icp_types"})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
 	want := fmt.Sprintf("返回 %d 种 ICP 主体类型", len(TypeCatalog()))
-	if res.Status != capkit.StatusSuccess || res.Summary != want {
+	if res.Status != core.StatusSuccess || res.Summary != want {
 		t.Fatalf("status=%s summary=%q want %q", res.Status, res.Summary, want)
 	}
 	if res.Meta.Tool != "icp_types" {
@@ -278,15 +278,15 @@ func TestTypesSummary(t *testing.T) {
 func TestUnavailableSummary(t *testing.T) {
 	ff := defaultFetcher()
 	ff.responses[authEndpoint] = `<html>当前访问疑似黑客攻击</html>`
-	kit := New(capkit.Deps{Fetcher: ff})
-	res, _ := kit.Call(context.Background(), capkit.Call{
+	kit := New(core.Deps{Fetcher: ff})
+	res, _ := kit.Call(context.Background(), core.Call{
 		Tool:  "icp_query",
 		Input: json.RawMessage(`{"query":"baidu.com"}`),
 	})
-	if res.Status != capkit.StatusUnavailable || res.OK {
+	if res.Status != core.StatusUnavailable || res.OK {
 		t.Fatalf("status=%s ok=%v", res.Status, res.OK)
 	}
-	if res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+	if res.Error == nil || res.Error.Code != core.CodeUnavailable {
 		t.Fatalf("error = %+v", res.Error)
 	}
 	if strings.TrimSpace(res.Summary) == "" {
@@ -299,9 +299,9 @@ func TestUnavailableSummary(t *testing.T) {
 
 // TestUnknownToolEnvelope 未知工具：信封仍须完整（Status/Meta.Summary）。
 func TestUnknownToolEnvelope(t *testing.T) {
-	kit := New(capkit.Deps{Fetcher: defaultFetcher()})
-	res, _ := kit.Call(context.Background(), capkit.Call{Tool: "nope"})
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	kit := New(core.Deps{Fetcher: defaultFetcher()})
+	res, _ := kit.Call(context.Background(), core.Call{Tool: "nope"})
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("未知工具应报 not_found: %+v", res)
 	}
 	if res.Meta.Tool != "nope" || strings.TrimSpace(res.Summary) == "" {

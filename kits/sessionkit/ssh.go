@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,7 +30,7 @@ type SSHOwner struct {
 }
 
 // Open dials, authenticates and returns a live SSH session.
-func (o *SSHOwner) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Session, error) {
+func (o *SSHOwner) Open(ctx context.Context, spec core.SessionSpec) (core.Session, error) {
 	port := spec.Port
 	if port == 0 {
 		port = 22
@@ -66,7 +66,7 @@ func (o *SSHOwner) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Se
 		return nil, fmt.Errorf("SSH 认证失败 %s: %w", addr, err)
 	}
 	client := ssh.NewClient(c, chans, reqs)
-	info := capkit.SessionInfo{
+	info := core.SessionInfo{
 		Kind: "ssh", Host: spec.Host, Port: port, User: spec.User,
 		Labels: spec.Labels, Meta: map[string]string{"server_version": string(client.ServerVersion())},
 	}
@@ -78,35 +78,35 @@ func (o *SSHOwner) Open(ctx context.Context, spec capkit.SessionSpec) (capkit.Se
 // SSHSession is a live SSH foothold.
 type SSHSession struct {
 	client *ssh.Client
-	info   capkit.SessionInfo
+	info   core.SessionInfo
 }
 
-func (s *SSHSession) Info() capkit.SessionInfo { return s.info }
+func (s *SSHSession) Info() core.SessionInfo { return s.info }
 
 func (s *SSHSession) Close() error { return s.client.Close() }
 
 // Exec runs cmd through a new SSH session channel.
-func (s *SSHSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts) (capkit.Output, error) {
+func (s *SSHSession) Exec(ctx context.Context, cmd string, opts core.ExecOpts) (core.Output, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return capkit.Output{}, fmt.Errorf("命令为空")
+		return core.Output{}, fmt.Errorf("命令为空")
 	}
 	sess, err := s.client.NewSession()
 	if err != nil {
-		return capkit.Output{}, fmt.Errorf("SSH 新建会话失败: %w", err)
+		return core.Output{}, fmt.Errorf("SSH 新建会话失败: %w", err)
 	}
 	defer func() { _ = sess.Close() }()
 
 	envList := ""
 	var envs []string
 	for k, v := range opts.Env {
-		envs = append(envs, fmt.Sprintf("export %s=%s; ", k, capkit.ShellQuote(v)))
+		envs = append(envs, fmt.Sprintf("export %s=%s; ", k, core.ShellQuote(v)))
 	}
 	if len(envs) > 0 {
 		envList = strings.Join(envs, "")
 	}
 	if opts.Dir != "" {
-		envList += "cd " + capkit.ShellQuote(opts.Dir) + "; "
+		envList += "cd " + core.ShellQuote(opts.Dir) + "; "
 	}
 	full := envList + cmd
 
@@ -119,7 +119,7 @@ func (s *SSHSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts)
 	if opts.TTY {
 		modes := ssh.TerminalModes{ssh.ECHO: 0}
 		if err := sess.RequestPty("xterm", 80, 24, modes); err != nil {
-			return capkit.Output{}, err
+			return core.Output{}, err
 		}
 	}
 
@@ -135,20 +135,20 @@ func (s *SSHSession) Exec(ctx context.Context, cmd string, opts capkit.ExecOpts)
 	select {
 	case <-ctx.Done():
 		_ = sess.Signal(ssh.SIGKILL)
-		return capkit.Output{}, ctx.Err()
+		return core.Output{}, ctx.Err()
 	case <-time.After(timeout):
 		_ = sess.Signal(ssh.SIGKILL)
-		return capkit.OutputFor(cmd, stdout.String(), stderr.String(), -1, time.Since(started), opts.MaxOutput), fmt.Errorf("SSH 命令超时")
+		return core.OutputFor(cmd, stdout.String(), stderr.String(), -1, time.Since(started), opts.MaxOutput), fmt.Errorf("SSH 命令超时")
 	case r := <-done:
 		exit := 0
 		if r.err != nil {
 			if ee, ok := r.err.(*ssh.ExitError); ok {
 				exit = ee.ExitStatus()
 			} else {
-				return capkit.OutputFor(cmd, stdout.String(), stderr.String(), -1, time.Since(started), opts.MaxOutput), r.err
+				return core.OutputFor(cmd, stdout.String(), stderr.String(), -1, time.Since(started), opts.MaxOutput), r.err
 			}
 		}
-		return capkit.OutputFor(cmd, stdout.String(), stderr.String(), exit, time.Since(started), opts.MaxOutput), nil
+		return core.OutputFor(cmd, stdout.String(), stderr.String(), exit, time.Since(started), opts.MaxOutput), nil
 	}
 }
 
@@ -163,7 +163,7 @@ func (s *SSHSession) Upload(ctx context.Context, src io.Reader, remote string) e
 	}
 	defer func() { _ = sess.Close() }()
 	sess.Stdin = src
-	quoted := capkit.ShellQuote(remote)
+	quoted := core.ShellQuote(remote)
 	return sess.Run("cat > " + quoted)
 }
 
@@ -181,7 +181,7 @@ func (s *SSHSession) Download(ctx context.Context, remote string) (io.ReadCloser
 		_ = sess.Close()
 		return nil, err
 	}
-	if err := sess.Start("cat " + capkit.ShellQuote(remote)); err != nil {
+	if err := sess.Start("cat " + core.ShellQuote(remote)); err != nil {
 		_ = sess.Close()
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *SSHSession) Download(ctx context.Context, remote string) (io.ReadCloser
 }
 
 // Tunnel opens a remote dial through the SSH connection.
-func (s *SSHSession) Tunnel(ctx context.Context, spec capkit.TunnelSpec) (capkit.Tunnel, error) {
+func (s *SSHSession) Tunnel(ctx context.Context, spec core.TunnelSpec) (core.Tunnel, error) {
 	network := spec.Network
 	if network == "" {
 		network = "tcp"
@@ -210,7 +210,7 @@ func (s *SSHSession) probe(ctx context.Context) {
 	if s.info.OS != "" {
 		return
 	}
-	out, err := s.Exec(ctx, "uname -s; uname -m; id -un 2>/dev/null; id -u 2>/dev/null", capkit.ExecOpts{Timeout: 8 * time.Second})
+	out, err := s.Exec(ctx, "uname -s; uname -m; id -un 2>/dev/null; id -u 2>/dev/null", core.ExecOpts{Timeout: 8 * time.Second})
 	if err != nil || out.Stdout == "" {
 		return
 	}
@@ -243,7 +243,7 @@ func osFromUname(u string) string {
 	}
 }
 
-func sshAuth(spec capkit.SessionSpec) ([]ssh.AuthMethod, error) {
+func sshAuth(spec core.SessionSpec) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 	if key := strings.TrimSpace(spec.Secret); key != "" && strings.Contains(key, "PRIVATE KEY") {
 		parsed, err := ssh.ParsePrivateKey([]byte(key))

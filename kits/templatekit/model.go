@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Kind identifies which engine executes a template.
@@ -80,12 +80,12 @@ type Template struct {
 
 // Ref converts a template into the engine-neutral reference consumed by
 // TemplateEngine implementations.
-func (t Template) Ref() (capkit.TemplateRef, error) {
+func (t Template) Ref() (core.TemplateRef, error) {
 	artifact := t.Artifact
 	if len(artifact) == 0 {
 		b, err := json.Marshal(t)
 		if err != nil {
-			return capkit.TemplateRef{}, err
+			return core.TemplateRef{}, err
 		}
 		artifact = b
 	}
@@ -99,7 +99,7 @@ func (t Template) Ref() (capkit.TemplateRef, error) {
 	if len(t.Product) > 0 {
 		meta["products"] = strings.Join(t.Product, ",")
 	}
-	return capkit.TemplateRef{
+	return core.TemplateRef{
 		ID: t.ID, Name: t.Name, Kind: string(t.Kind), Engine: t.Engine,
 		Artifact: artifact, Meta: meta,
 	}, nil

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/identitykit"
 )
 
@@ -37,7 +37,7 @@ func TestExtractCSRF(t *testing.T) {
 }
 
 func TestJarIdentityHeaders(t *testing.T) {
-	id, err := identitykit.NewJarIdentity("https://app.test/", http.Header{"X-Api-Key": []string{"k"}}, capkit.IdentityScope{Hosts: []string{"app.test"}})
+	id, err := identitykit.NewJarIdentity("https://app.test/", http.Header{"X-Api-Key": []string{"k"}}, core.IdentityScope{Hosts: []string{"app.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,20 +58,20 @@ func TestJarIdentityHeaders(t *testing.T) {
 	if err := id.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := identitykit.NewJarIdentity("not a url", nil, capkit.IdentityScope{}); err == nil {
+	if _, err := identitykit.NewJarIdentity("not a url", nil, core.IdentityScope{}); err == nil {
 		t.Fatal("expected invalid target error")
 	}
 }
 
 func TestTokenIdentityRefresh(t *testing.T) {
 	refreshCalls := 0
-	id := identitykit.NewTokenIdentity("Bearer", "old", capkit.TokenSnapshot{
+	id := identitykit.NewTokenIdentity("Bearer", "old", core.TokenSnapshot{
 		AccessToken: "old",
 		ExpiresAt:   time.Now().Add(-time.Minute), // already expired
-	}, func(context.Context, string) (capkit.TokenSnapshot, error) {
+	}, func(context.Context, string) (core.TokenSnapshot, error) {
 		refreshCalls++
-		return capkit.TokenSnapshot{AccessToken: "new", ExpiresAt: time.Now().Add(time.Hour)}, nil
-	}, capkit.IdentityScope{})
+		return core.TokenSnapshot{AccessToken: "new", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}, core.IdentityScope{})
 
 	h, err := id.Headers(context.Background())
 	if err != nil {
@@ -96,16 +96,16 @@ func TestTokenIdentityRefresh(t *testing.T) {
 }
 
 func TestTokenIdentityRefreshError(t *testing.T) {
-	id := identitykit.NewTokenIdentity("Bearer", "t", capkit.TokenSnapshot{ExpiresAt: time.Now().Add(-time.Hour)},
-		func(context.Context, string) (capkit.TokenSnapshot, error) {
-			return capkit.TokenSnapshot{}, context.DeadlineExceeded
+	id := identitykit.NewTokenIdentity("Bearer", "t", core.TokenSnapshot{ExpiresAt: time.Now().Add(-time.Hour)},
+		func(context.Context, string) (core.TokenSnapshot, error) {
+			return core.TokenSnapshot{}, context.DeadlineExceeded
 		},
-		capkit.IdentityScope{})
+		core.IdentityScope{})
 	if _, err := id.Headers(context.Background()); err == nil {
 		t.Fatal("expected refresh error")
 	}
 	// A static token (no refresh fn) never errors.
-	static := identitykit.NewTokenIdentity("Bearer", "s", capkit.TokenSnapshot{}, nil, capkit.IdentityScope{})
+	static := identitykit.NewTokenIdentity("Bearer", "s", core.TokenSnapshot{}, nil, core.IdentityScope{})
 	if _, err := static.Headers(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -113,13 +113,13 @@ func TestTokenIdentityRefreshError(t *testing.T) {
 
 func TestTokenSnapshotNeedsRefresh(t *testing.T) {
 	now := time.Now()
-	if (capkit.TokenSnapshot{}).NeedsRefresh(now, time.Minute) {
+	if (core.TokenSnapshot{}).NeedsRefresh(now, time.Minute) {
 		t.Fatal("zero expiry must not trigger refresh")
 	}
-	if !(capkit.TokenSnapshot{ExpiresAt: now.Add(10 * time.Second)}).NeedsRefresh(now, time.Minute) {
+	if !(core.TokenSnapshot{ExpiresAt: now.Add(10 * time.Second)}).NeedsRefresh(now, time.Minute) {
 		t.Fatal("token expiring within skew must refresh")
 	}
-	if (capkit.TokenSnapshot{ExpiresAt: now.Add(time.Hour)}).NeedsRefresh(now, time.Minute) {
+	if (core.TokenSnapshot{ExpiresAt: now.Add(time.Hour)}).NeedsRefresh(now, time.Minute) {
 		t.Fatal("fresh token must not refresh")
 	}
 }
@@ -148,7 +148,7 @@ func TestFormFlowLogin(t *testing.T) {
 		HTTP: doer, Target: srv.URL,
 		SuccessCheck: func(status int, body string) bool { return strings.Contains(body, "welcome") },
 	}
-	id, err := flow.Login(context.Background(), capkit.Credentials{Username: "admin", Password: "pw"})
+	id, err := flow.Login(context.Background(), core.Credentials{Username: "admin", Password: "pw"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,15 +173,15 @@ func TestFormFlowLogin(t *testing.T) {
 
 func TestFormFlowMissingHTTPDoer(t *testing.T) {
 	flow := &identitykit.FormFlow{LoginURL: "http://x/login"}
-	if _, err := flow.Login(context.Background(), capkit.Credentials{}); err == nil {
+	if _, err := flow.Login(context.Background(), core.Credentials{}); err == nil {
 		t.Fatal("expected HTTPDoer requirement error")
 	}
 }
 
-// httpDoer adapts net/http to capkit.HTTPDoer for tests.
+// httpDoer adapts net/http to core.HTTPDoer for tests.
 type httpDoer struct{}
 
-func (httpDoer) Do(ctx context.Context, req capkit.Request) (*capkit.Response, error) {
+func (httpDoer) Do(ctx context.Context, req core.Request) (*core.Response, error) {
 	method := req.Method
 	if method == "" {
 		method = "GET"
@@ -207,5 +207,5 @@ func (httpDoer) Do(ctx context.Context, req capkit.Request) (*capkit.Response, e
 			break
 		}
 	}
-	return &capkit.Response{Status: resp.StatusCode, Headers: resp.Header, Body: body}, nil
+	return &core.Response{Status: resp.StatusCode, Headers: resp.Header, Body: body}, nil
 }

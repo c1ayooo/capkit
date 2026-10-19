@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // Capability exposes the template catalog as read-only tools. It never
@@ -21,7 +21,7 @@ type Capability struct {
 // NewCapability builds the capability. When the host already provides a
 // *Catalog as Deps.Templates it is reused so hot-reloaded packs are visible
 // here too; otherwise an empty catalog is created.
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
+func NewCapability(deps core.Deps) (core.Capability, error) {
 	c := &Capability{}
 	if cat, ok := deps.Templates.(*Catalog); ok && cat != nil {
 		c.catalog = cat
@@ -32,14 +32,14 @@ func NewCapability(deps capkit.Deps) (capkit.Capability, error) {
 }
 
 // Manifest declares the catalog tools.
-func Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "templatekit", Version: "0.2.0", APIVersion: "v1",
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:        "template_search",
 				Description: "按关键字、产品、指纹、CVE、标签或严重级别检索模板目录，返回引擎中立引用（ID/名称/类型）。只读，不执行。",
-				Risk:        capkit.RiskLow,
+				Risk:        core.RiskLow,
 				InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{
@@ -65,7 +65,7 @@ func Manifest() capkit.Manifest {
 			{
 				Name:        "template_get",
 				Description: "按模板 ID 取出单条模板及其执行产物（引用 + 内容）。只读，不执行。",
-				Risk:        capkit.RiskLow,
+				Risk:        core.RiskLow,
 				InputSchema: json.RawMessage(`{
   "type":"object",
   "properties":{"id":{"type":"string"}},
@@ -83,54 +83,54 @@ func Manifest() capkit.Manifest {
 	}
 }
 
-// Manifest implements capkit.Capability.
-func (c *Capability) Manifest() capkit.Manifest { return Manifest() }
+// Manifest implements core.Capability.
+func (c *Capability) Manifest() core.Manifest { return Manifest() }
 
 // Call dispatches the catalog tools.
-func (c *Capability) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "template_search":
 		return c.search(ctx, call)
 	case "template_get":
 		return c.get(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (c *Capability) search(ctx context.Context, call capkit.Call) (capkit.Result, error) {
-	var q capkit.TemplateQuery
+func (c *Capability) search(ctx context.Context, call core.Call) (core.Result, error) {
+	var q core.TemplateQuery
 	if err := json.Unmarshal(call.Input, &q); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	refs, err := c.catalog.Search(ctx, q)
 	if err != nil {
-		return capkit.FailResult(capkit.AsError(err)), nil
+		return core.FailResult(core.AsError(err)), nil
 	}
-	res, _ := capkit.SuccessResult(fmt.Sprintf("命中 %d 条模板（目录共 %d 条）", len(refs), c.catalog.Count()), map[string]any{
+	res, _ := core.SuccessResult(fmt.Sprintf("命中 %d 条模板（目录共 %d 条）", len(refs), c.catalog.Count()), map[string]any{
 		"count": len(refs), "total": c.catalog.Count(), "templates": refs,
 	})
 	return res, nil
 }
 
-func (c *Capability) get(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (c *Capability) get(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	if strings.TrimSpace(in.ID) == "" {
-		return capkit.FailResult(capkit.InvalidInput("id 必填")), nil
+		return core.FailResult(core.InvalidInput("id 必填")), nil
 	}
 	ref, ok, err := c.catalog.Get(ctx, in.ID)
 	if err != nil {
-		return capkit.FailResult(capkit.AsError(err)), nil
+		return core.FailResult(core.AsError(err)), nil
 	}
 	if !ok {
-		return capkit.FailResult(capkit.NotFound("模板不存在: " + in.ID)), nil
+		return core.FailResult(core.NotFound("模板不存在: " + in.ID)), nil
 	}
-	data, _ := capkit.DataResult(map[string]any{
+	data, _ := core.DataResult(map[string]any{
 		"id": ref.ID, "name": ref.Name, "kind": ref.Kind, "engine": ref.Engine,
 		"artifact_base64": base64.StdEncoding.EncodeToString(ref.Artifact), "meta": ref.Meta,
 	})

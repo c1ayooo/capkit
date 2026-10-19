@@ -8,21 +8,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // errDoer is an HTTPDoer that always fails, for the failure branches.
 type errDoer struct{ err error }
 
-func (e errDoer) Do(context.Context, capkit.Request) (*capkit.Response, error) { return nil, e.err }
+func (e errDoer) Do(context.Context, core.Request) (*core.Response, error) { return nil, e.err }
 
 // memEvidence is an in-memory EvidenceSink.
 type memEvidence struct {
 	err     error
-	records []capkit.Evidence
+	records []core.Evidence
 }
 
-func (m *memEvidence) Record(_ context.Context, ev capkit.Evidence) (string, error) {
+func (m *memEvidence) Record(_ context.Context, ev core.Evidence) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
@@ -30,9 +30,9 @@ func (m *memEvidence) Record(_ context.Context, ev capkit.Evidence) (string, err
 	return fmt.Sprintf("ev-%d", len(m.records)), nil
 }
 
-func probeCall(t *testing.T, kit *Kit, input string) capkit.Result {
+func probeCall(t *testing.T, kit *Kit, input string) core.Result {
 	t.Helper()
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "http_probe", Input: json.RawMessage(input)})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "http_probe", Input: json.RawMessage(input)})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -40,7 +40,7 @@ func probeCall(t *testing.T, kit *Kit, input string) capkit.Result {
 }
 
 func TestProbeSuccessSummary(t *testing.T) {
-	doer := &fakeDoer{resp: &capkit.Response{
+	doer := &fakeDoer{resp: &core.Response{
 		Status: 200, Body: []byte("hello world"),
 		Headers:  map[string][]string{"Server": {"nginx/1.25"}},
 		Duration: 12 * time.Millisecond, FinalURL: "http://h/x",
@@ -49,7 +49,7 @@ func TestProbeSuccessSummary(t *testing.T) {
 	kit := &Kit{HTTP: doer, Evidence: ev}
 	res := probeCall(t, kit, `{"url":"http://h/x","method":"post"}`)
 
-	if !res.OK || res.Status != capkit.StatusSuccess {
+	if !res.OK || res.Status != core.StatusSuccess {
 		t.Fatalf("result = %+v", res)
 	}
 	if res.Meta.Tool != "http_probe" || res.Meta.Version != kitVersion {
@@ -76,7 +76,7 @@ func TestProbeSuccessSummary(t *testing.T) {
 }
 
 func TestProbeSummaryWithoutServerHeader(t *testing.T) {
-	kit := &Kit{HTTP: &fakeDoer{resp: &capkit.Response{Status: 204, Body: nil}}}
+	kit := &Kit{HTTP: &fakeDoer{resp: &core.Response{Status: 204, Body: nil}}}
 	res := probeCall(t, kit, `{"url":"http://h/"}`)
 	if !strings.Contains(res.Summary, "Server=-") {
 		t.Fatalf("summary = %q", res.Summary)
@@ -89,7 +89,7 @@ func TestProbeSummaryWithoutServerHeader(t *testing.T) {
 func TestProbeInvalidInput(t *testing.T) {
 	kit := &Kit{HTTP: &fakeDoer{}}
 	res := probeCall(t, kit, `{not json`)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("result = %+v", res)
 	}
 	if strings.TrimSpace(res.Summary) == "" {
@@ -100,7 +100,7 @@ func TestProbeInvalidInput(t *testing.T) {
 func TestProbeNilHTTP(t *testing.T) {
 	kit := &Kit{}
 	res := probeCall(t, kit, `{"url":"http://h/"}`)
-	if res.Status != capkit.StatusUnavailable || res.Error == nil || res.Error.Code != capkit.CodeUnavailable {
+	if res.Status != core.StatusUnavailable || res.Error == nil || res.Error.Code != core.CodeUnavailable {
 		t.Fatalf("result = %+v", res)
 	}
 	if !strings.Contains(res.Summary, "http://h/") {
@@ -109,16 +109,16 @@ func TestProbeNilHTTP(t *testing.T) {
 }
 
 func TestProbeHTTPError(t *testing.T) {
-	kit := &Kit{HTTP: errDoer{err: capkit.ScopeDenied("out of scope")}}
+	kit := &Kit{HTTP: errDoer{err: core.ScopeDenied("out of scope")}}
 	res := probeCall(t, kit, `{"url":"http://h/"}`)
-	if res.Status != capkit.StatusBlocked || res.Error == nil || res.Error.Code != capkit.CodeScopeDenied {
+	if res.Status != core.StatusBlocked || res.Error == nil || res.Error.Code != core.CodeScopeDenied {
 		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestProbeEvidenceErrorKeepsResult(t *testing.T) {
 	kit := &Kit{
-		HTTP:     &fakeDoer{resp: &capkit.Response{Status: 200, Body: []byte("x")}},
+		HTTP:     &fakeDoer{resp: &core.Response{Status: 200, Body: []byte("x")}},
 		Evidence: &memEvidence{err: fmt.Errorf("disk full")},
 	}
 	res := probeCall(t, kit, `{"url":"http://h/"}`)
@@ -129,11 +129,11 @@ func TestProbeEvidenceErrorKeepsResult(t *testing.T) {
 
 func TestProbeUnknownTool(t *testing.T) {
 	kit := &Kit{HTTP: &fakeDoer{}}
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "nope", Input: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeNotFound {
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeNotFound {
 		t.Fatalf("result = %+v", res)
 	}
 	if res.Meta.Tool != "nope" {
@@ -142,7 +142,7 @@ func TestProbeUnknownTool(t *testing.T) {
 }
 
 func TestNewCapability(t *testing.T) {
-	cap, err := NewCapability(capkit.Deps{HTTP: &fakeDoer{}})
+	cap, err := NewCapability(core.Deps{HTTP: &fakeDoer{}})
 	if err != nil || cap == nil {
 		t.Fatalf("cap=%v err=%v", cap, err)
 	}
@@ -155,30 +155,30 @@ func TestNewCapability(t *testing.T) {
 
 func TestExecuteNilHTTP(t *testing.T) {
 	kit := &Kit{}
-	res, err := kit.Execute(context.Background(), nil, capkit.Target{URL: "http://h"}, nil)
+	res, err := kit.Execute(context.Background(), nil, core.Target{URL: "http://h"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != capkit.StatusUnavailable || res.Error == nil {
+	if res.Status != core.StatusUnavailable || res.Error == nil {
 		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestExecuteInvalidTarget(t *testing.T) {
 	kit := &Kit{HTTP: &fakeDoer{}}
-	res, _ := kit.Execute(context.Background(), nil, capkit.Target{}, nil)
-	if res.Status != capkit.StatusFailed || res.Error == nil || res.Error.Code != capkit.CodeInvalidInput {
+	res, _ := kit.Execute(context.Background(), nil, core.Target{}, nil)
+	if res.Status != core.StatusFailed || res.Error == nil || res.Error.Code != core.CodeInvalidInput {
 		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestExecuteTemplateErrorBranches(t *testing.T) {
-	kit := &Kit{HTTP: &fakeDoer{resp: &capkit.Response{Status: 200, Body: []byte("ok")}}}
-	refs := []capkit.TemplateRef{
+	kit := &Kit{HTTP: &fakeDoer{resp: &core.Response{Status: 200, Body: []byte("ok")}}}
+	refs := []core.TemplateRef{
 		{ID: "bad", Artifact: []byte(`{not json`)},
 		{ID: "nopath", Artifact: []byte(`{"request":{"method":"GET"}}`)},
 	}
-	res, err := kit.Execute(context.Background(), refs, capkit.Target{URL: "http://h"}, nil)
+	res, err := kit.Execute(context.Background(), refs, core.Target{URL: "http://h"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +201,8 @@ func TestExecuteTemplateErrorBranches(t *testing.T) {
 
 func TestExecuteHTTPErrorBranch(t *testing.T) {
 	kit := &Kit{HTTP: errDoer{err: fmt.Errorf("dial failed")}}
-	refs := []capkit.TemplateRef{{ID: "t", Artifact: []byte(`{"request":{"path":"/"}}`)}}
-	res, _ := kit.Execute(context.Background(), refs, capkit.Target{URL: "http://h"}, nil)
+	refs := []core.TemplateRef{{ID: "t", Artifact: []byte(`{"request":{"path":"/"}}`)}}
+	res, _ := kit.Execute(context.Background(), refs, core.Target{URL: "http://h"}, nil)
 	var data struct {
 		Results []engineResult `json:"results"`
 	}
@@ -216,9 +216,9 @@ func TestExecuteHTTPErrorBranch(t *testing.T) {
 
 func TestExecuteEvidenceAndNoMatchers(t *testing.T) {
 	ev := &memEvidence{}
-	kit := &Kit{HTTP: &fakeDoer{resp: &capkit.Response{Status: 200, Body: []byte("body")}}, Evidence: ev}
-	refs := []capkit.TemplateRef{{ID: "t", Artifact: []byte(`{"request":{"path":"/x"}}`)}}
-	res, _ := kit.Execute(context.Background(), refs, capkit.Target{URL: "http://h"}, nil)
+	kit := &Kit{HTTP: &fakeDoer{resp: &core.Response{Status: 200, Body: []byte("body")}}, Evidence: ev}
+	refs := []core.TemplateRef{{ID: "t", Artifact: []byte(`{"request":{"path":"/x"}}`)}}
+	res, _ := kit.Execute(context.Background(), refs, core.Target{URL: "http://h"}, nil)
 	var data struct {
 		Results []engineResult `json:"results"`
 	}
@@ -236,16 +236,16 @@ func TestExecuteEvidenceAndNoMatchers(t *testing.T) {
 func TestEngineBaseURL(t *testing.T) {
 	cases := []struct {
 		name string
-		tgt  capkit.Target
+		tgt  core.Target
 		want string
 		err  bool
 	}{
-		{"url", capkit.Target{URL: "https://host:8443/a/b?x=1"}, "https://host:8443", false},
-		{"host", capkit.Target{Host: "h"}, "http://h", false},
-		{"host443", capkit.Target{Host: "h", Port: 443}, "https://h", false},
-		{"ipport", capkit.Target{IP: "10.0.0.1", Port: 8080}, "http://10.0.0.1:8080", false},
-		{"badurl", capkit.Target{URL: "http://"}, "", true},
-		{"empty", capkit.Target{}, "", true},
+		{"url", core.Target{URL: "https://host:8443/a/b?x=1"}, "https://host:8443", false},
+		{"host", core.Target{Host: "h"}, "http://h", false},
+		{"host443", core.Target{Host: "h", Port: 443}, "https://h", false},
+		{"ipport", core.Target{IP: "10.0.0.1", Port: 8080}, "http://10.0.0.1:8080", false},
+		{"badurl", core.Target{URL: "http://"}, "", true},
+		{"empty", core.Target{}, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,7 +264,7 @@ func TestEngineBaseURL(t *testing.T) {
 }
 
 func TestMatchOneBranches(t *testing.T) {
-	res := &capkit.Response{
+	res := &core.Response{
 		Status: 403, Body: []byte("Forbidden: SQL syntax"),
 		Headers: map[string][]string{"Server": {"nginx"}},
 	}
@@ -298,7 +298,7 @@ func TestMatchOneBranches(t *testing.T) {
 }
 
 func TestExtractEngineValues(t *testing.T) {
-	res := &capkit.Response{Body: []byte("user=admin")}
+	res := &core.Response{Body: []byte("user=admin")}
 	got := extractEngineValues([]engineExtract{
 		{Name: "u", Regex: `user=(\w+)`},
 		{Name: "missing", Regex: `nope=(\w+)`},

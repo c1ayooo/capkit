@@ -1,4 +1,4 @@
-package capkit
+package core
 
 // Risk is the declared blast radius of a tool. Hosts use it to decide approval
 // and UI affordances; the runtime also enforces a minimum gate.

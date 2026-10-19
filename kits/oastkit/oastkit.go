@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 const DefaultBaseURL = "http://dnslog.cn"
@@ -21,7 +21,7 @@ const DefaultBaseURL = "http://dnslog.cn"
 const kitVersion = "0.1.0"
 
 type Client struct {
-	Fetcher capkit.Fetcher
+	Fetcher core.Fetcher
 	BaseURL string
 
 	mu     sync.Mutex
@@ -38,9 +38,9 @@ func (c *Client) base() string {
 
 func (c *Client) GetDomain(ctx context.Context) (string, error) {
 	if c.Fetcher == nil {
-		return "", capkit.Unavailable("oast fetcher is not configured")
+		return "", core.Unavailable("oast fetcher is not configured")
 	}
-	res, err := c.Fetcher.Fetch(ctx, capkit.Request{
+	res, err := c.Fetcher.Fetch(ctx, core.Request{
 		Method: "GET", URL: c.base() + "/getdomain.php", Timeout: 15 * time.Second,
 		Headers: map[string]string{"User-Agent": "capkit-oastkit"},
 	})
@@ -48,12 +48,12 @@ func (c *Client) GetDomain(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if res.Status != 200 {
-		return "", capkit.Unavailable(fmt.Sprintf("dnslog getdomain HTTP %d", res.Status))
+		return "", core.Unavailable(fmt.Sprintf("dnslog getdomain HTTP %d", res.Status))
 	}
 	cookie := firstHeader(res.Headers, "Set-Cookie")
 	domain := strings.TrimSpace(string(res.Body))
 	if domain == "" {
-		return "", capkit.Unavailable("dnslog returned an empty domain")
+		return "", core.Unavailable("dnslog returned an empty domain")
 	}
 	c.mu.Lock()
 	c.cookie = cookie
@@ -63,11 +63,11 @@ func (c *Client) GetDomain(ctx context.Context) (string, error) {
 
 func (c *Client) GetRecords(ctx context.Context, domain string, waitSec int) ([]string, error) {
 	if c.Fetcher == nil {
-		return nil, capkit.Unavailable("oast fetcher is not configured")
+		return nil, core.Unavailable("oast fetcher is not configured")
 	}
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
-		return nil, capkit.InvalidInput("domain is required")
+		return nil, core.InvalidInput("domain is required")
 	}
 	if waitSec > 0 {
 		select {
@@ -82,7 +82,7 @@ func (c *Client) GetRecords(ctx context.Context, domain string, waitSec int) ([]
 		headers["Cookie"] = c.cookie
 	}
 	c.mu.Unlock()
-	res, err := c.Fetcher.Fetch(ctx, capkit.Request{
+	res, err := c.Fetcher.Fetch(ctx, core.Request{
 		Method: "GET", URL: c.base() + "/getrecords.php?t=" + url.QueryEscape(domain),
 		Timeout: 15 * time.Second, Headers: headers,
 	})
@@ -90,7 +90,7 @@ func (c *Client) GetRecords(ctx context.Context, domain string, waitSec int) ([]
 		return nil, err
 	}
 	if res.Status != 200 {
-		return nil, capkit.Unavailable(fmt.Sprintf("dnslog getrecords HTTP %d", res.Status))
+		return nil, core.Unavailable(fmt.Sprintf("dnslog getrecords HTTP %d", res.Status))
 	}
 	return parseRecords(res.Body), nil
 }
@@ -139,30 +139,30 @@ func firstHeader(headers map[string][]string, name string) string {
 // Kit exposes dnslog.cn as two tools.
 type Kit struct {
 	client   *Client
-	evidence capkit.EvidenceSink
+	evidence core.EvidenceSink
 }
 
-func New(deps capkit.Deps) *Kit {
+func New(deps core.Deps) *Kit {
 	return &Kit{
 		client:   &Client{Fetcher: deps.Fetcher},
 		evidence: deps.Evidence,
 	}
 }
 
-func NewCapability(deps capkit.Deps) (capkit.Capability, error) { return New(deps), nil }
+func NewCapability(deps core.Deps) (core.Capability, error) { return New(deps), nil }
 
-func (k *Kit) Manifest() capkit.Manifest {
-	return capkit.Manifest{
+func (k *Kit) Manifest() core.Manifest {
+	return core.Manifest{
 		Name: "oastkit", Version: kitVersion, APIVersion: "v1",
 		Requires: []string{"limiter", "audit", "fetcher"},
-		Tools: []capkit.ToolSpec{
+		Tools: []core.ToolSpec{
 			{
 				Name:           "oast_get_domain",
 				Description:    "Get a fresh dnslog.cn callback domain for blind SSRF/XXE/injection verification. The domain is bound to an in-memory session cookie; follow with oast_get_records.",
 				InputSchema:    json.RawMessage(`{"type":"object","properties":{}}`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"domain":{"type":"string"}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			},
 			{
 				Name:        "oast_get_records",
@@ -175,9 +175,9 @@ func (k *Kit) Manifest() capkit.Manifest {
   },
   "required":["domain"]
 }`),
-				Risk:           capkit.RiskLow,
+				Risk:           core.RiskLow,
 				OutputSchema:   json.RawMessage(`{"type":"object","properties":{"records":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}}}`),
-				ExtractTargets: func(json.RawMessage) ([]capkit.Target, error) { return nil, nil },
+				ExtractTargets: func(json.RawMessage) ([]core.Target, error) { return nil, nil },
 			},
 		},
 	}
@@ -185,49 +185,49 @@ func (k *Kit) Manifest() capkit.Manifest {
 
 // Call is the envelope shell: it runs the tool and normalizes the Result so
 // every return path carries a valid Status, Meta.Tool and a clamped Summary.
-func (k *Kit) Call(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) Call(ctx context.Context, call core.Call) (core.Result, error) {
 	res, err := k.dispatch(ctx, call)
 	return res.Normalize(call.Tool, kitVersion), err
 }
 
 // dispatch routes a call to its tool implementation, exactly as before.
-func (k *Kit) dispatch(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) dispatch(ctx context.Context, call core.Call) (core.Result, error) {
 	switch call.Tool {
 	case "oast_get_domain":
 		return k.getDomain(ctx)
 	case "oast_get_records":
 		return k.getRecords(ctx, call)
 	default:
-		return capkit.FailResult(capkit.NotFound("unknown tool: " + call.Tool)), nil
+		return core.FailResult(core.NotFound("unknown tool: " + call.Tool)), nil
 	}
 }
 
-func (k *Kit) getDomain(ctx context.Context) (capkit.Result, error) {
+func (k *Kit) getDomain(ctx context.Context) (core.Result, error) {
 	domain, err := k.client.GetDomain(ctx)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
-	res, _ := capkit.SuccessResult("申请到 dnslog 回连域名 "+domain, map[string]any{"domain": domain})
+	res, _ := core.SuccessResult("申请到 dnslog 回连域名 "+domain, map[string]any{"domain": domain})
 	return res, nil
 }
 
-func (k *Kit) getRecords(ctx context.Context, call capkit.Call) (capkit.Result, error) {
+func (k *Kit) getRecords(ctx context.Context, call core.Call) (core.Result, error) {
 	var in struct {
 		Domain      string `json:"domain"`
 		WaitSeconds int    `json:"wait_seconds"`
 	}
 	if err := json.Unmarshal(call.Input, &in); err != nil {
-		return capkit.FailResult(capkit.InvalidInput(err.Error())), nil
+		return core.FailResult(core.InvalidInput(err.Error())), nil
 	}
 	records, err := k.client.GetRecords(ctx, in.Domain, in.WaitSeconds)
 	if err != nil {
-		return capkit.FailResult(err), nil
+		return core.FailResult(err), nil
 	}
 	summary := fmt.Sprintf("查询 %s 的 DNS 交互记录，命中 %d 条", strings.TrimSpace(in.Domain), len(records))
-	res, _ := capkit.SuccessResult(summary, map[string]any{"domain": in.Domain, "records": records, "count": len(records)})
+	res, _ := core.SuccessResult(summary, map[string]any{"domain": in.Domain, "records": records, "count": len(records)})
 	if k.evidence != nil && len(records) > 0 {
 		data, _ := json.Marshal(records)
-		id, eerr := k.evidence.Record(ctx, capkit.Evidence{
+		id, eerr := k.evidence.Record(ctx, core.Evidence{
 			Kind: "oast", Title: "dnslog records " + in.Domain, Data: data, CreatedAt: time.Now(),
 			Metadata: map[string]string{"domain": in.Domain, "records": fmt.Sprint(len(records))},
 		})

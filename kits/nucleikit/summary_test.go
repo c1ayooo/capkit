@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/harness"
 	"github.com/c1ayooo/capkit/kits/nucleikit"
 )
 
 func TestNucleiStatusSummary(t *testing.T) {
 	ports := harness.NewPorts()
-	ports.Binaries.State = capkit.BinaryStatus{Installed: true, Version: "test-1.0", Path: "/fake/nuclei"}
+	ports.Binaries.State = core.BinaryStatus{Installed: true, Version: "test-1.0", Path: "/fake/nuclei"}
 	kit := nucleikit.New(ports.Deps())
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "nuclei_status", Input: json.RawMessage(`{}`)})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "nuclei_status", Input: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,16 +27,16 @@ func TestNucleiStatusSummary(t *testing.T) {
 	if res.Meta.Tool != "nuclei_status" || res.Meta.Version != "0.1.0" {
 		t.Fatalf("meta = %+v", res.Meta)
 	}
-	if !res.OK || res.Status != capkit.StatusSuccess {
+	if !res.OK || res.Status != core.StatusSuccess {
 		t.Fatalf("result = %+v", res)
 	}
 }
 
 func TestNucleiStatusNotInstalledSummary(t *testing.T) {
 	ports := harness.NewPorts()
-	ports.Binaries.State = capkit.BinaryStatus{Installed: false, Version: "0.0.0"}
+	ports.Binaries.State = core.BinaryStatus{Installed: false, Version: "0.0.0"}
 	kit := nucleikit.New(ports.Deps())
-	res, _ := kit.Call(context.Background(), capkit.Call{Tool: "nuclei_status", Input: json.RawMessage(`{}`)})
+	res, _ := kit.Call(context.Background(), core.Call{Tool: "nuclei_status", Input: json.RawMessage(`{}`)})
 	if !strings.Contains(res.Summary, "未安装") {
 		t.Fatalf("summary = %q", res.Summary)
 	}
@@ -53,7 +53,7 @@ func TestNucleiScanSummary(t *testing.T) {
 		"targets":   []string{"http://127.0.0.1:18080"},
 		"templates": []string{"t1", "t2"},
 	})
-	res, err := kit.Call(context.Background(), capkit.Call{Tool: "nuclei_scan", Input: input})
+	res, err := kit.Call(context.Background(), core.Call{Tool: "nuclei_scan", Input: input})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@
 //     huaweicloud-sdk-go-v3) and lets the SDK sign. Nothing here hand-rolls a
 //     signature, so a vendor changing its scheme is a dependency bump, not a
 //     silent breakage.
-//  2. Every SDK request goes through the injected capkit.HTTPDoer, so the
+//  2. Every SDK request goes through the injected core.HTTPDoer, so the
 //     host's scope check, rate limit and audit still apply. A host must allow
 //     the vendor endpoints it wants reachable, otherwise the tool is blocked
 //     like any other out-of-scope call.

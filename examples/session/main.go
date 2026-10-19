@@ -13,10 +13,10 @@ import (
 	"log"
 	"os/exec"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/auditlog"
 	execport "github.com/c1ayooo/capkit/adapters/exec"
 	"github.com/c1ayooo/capkit/adapters/settings"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
@@ -38,8 +38,8 @@ func main() {
 	manager.RegisterOpener("cli", &sessionkit.CLIOpener{Runner: execport.NewLocal(audit), AllowedCommands: []string{"echo", "uname", "id"}})
 
 	scope := gates.StaticScope("local")
-	reg := capkit.NewRegistry()
-	if err := reg.Add(capkit.Spec{Manifest: shellkit.Manifest(), New: shellkit.NewCapability}); err != nil {
+	reg := core.NewRegistry()
+	if err := reg.Add(core.Spec{Manifest: shellkit.Manifest(), New: shellkit.NewCapability}); err != nil {
 		log.Fatal(err)
 	}
 
@@ -53,7 +53,7 @@ func main() {
 	defer func() { _ = manager.CloseAll() }()
 
 	ctx := context.Background()
-	cc := capkit.CallContext{ProjectID: 1, Actor: "example"}
+	cc := core.CallContext{ProjectID: 1, Actor: "example"}
 
 	// 1. Open a session.
 	openIn, _ := json.Marshal(map[string]any{"kind": "cli", "host": "local", "timeout_ms": 5000})
@@ -64,7 +64,7 @@ func main() {
 	fmt.Println("== session_open ==")
 	fmt.Println("status:", opened.Status, "| summary:", opened.Summary)
 	printJSON(opened.Data)
-	if opened.Status != capkit.StatusSuccess {
+	if opened.Status != core.StatusSuccess {
 		log.Fatalf("session_open did not succeed: %s", opened.Error.Message)
 	}
 	var openData struct {

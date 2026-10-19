@@ -6,7 +6,7 @@ package credkit
 import (
 	"context"
 	"fmt"
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 	"net"
 	"strconv"
 	"strings"
@@ -96,7 +96,7 @@ func VerifySSH(ctx context.Context, in SSHProbeInput) (*SSHProbeResult, error) {
 	res := &SSHProbeResult{Alive: true, Authed: true, Banner: strings.TrimSpace(string(sshConn.ServerVersion()))}
 	if out, err := runSSHCommand(ctx, client, "id", 5*time.Second); err == nil {
 		idLine := strings.TrimSpace(out)
-		res.Groups = capkit.Truncate(idLine, 300)
+		res.Groups = core.Truncate(idLine, 300)
 		if parts := strings.Fields(idLine); len(parts) > 0 {
 			res.User = strings.TrimPrefix(parts[0], "uid=")
 		}

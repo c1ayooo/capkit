@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/c1ayooo/capkit"
+	"github.com/c1ayooo/capkit/core"
 )
 
 // RunOptions 一次运行的入参。
@@ -39,7 +39,7 @@ type RunOptions struct {
 	Resolver    DNSResolver       // dns 步解析器（测试注入）；nil = 平台侧默认（net.DefaultResolver）
 	TCPDialer   TCPDialer         // tcp 步拨号器（测试注入）；nil = 平台侧默认（&net.Dialer{Timeout: 单步超时}）
 	// Scope 可选；非 nil 时每个 http/tcp/dns 步骤执行前校验目标。宿主应始终注入。
-	Scope capkit.ScopeChecker
+	Scope core.ScopeChecker
 }
 
 // Run 确定性执行剧本。恒返回非 nil 的 RunResult（失败语义在 Verdict/Reason，不靠 error）；
@@ -592,7 +592,7 @@ func render(text string, vars map[string]string) string {
 }
 
 // checkStepScope 在每步执行前校验目标。scope 为 nil 时保持旧行为（宿主应注入）。
-func checkStepScope(ctx context.Context, scope capkit.ScopeChecker, st *Step, vars map[string]string, baseURL string) error {
+func checkStepScope(ctx context.Context, scope core.ScopeChecker, st *Step, vars map[string]string, baseURL string) error {
 	if scope == nil {
 		return nil
 	}
@@ -602,7 +602,7 @@ func checkStepScope(ctx context.Context, scope capkit.ScopeChecker, st *Step, va
 		if host == "" {
 			return fmt.Errorf("tcp 步骤 %s 缺少 host", st.Name)
 		}
-		t, err := capkit.TargetFromString(0, host)
+		t, err := core.TargetFromString(0, host)
 		if err != nil {
 			return err
 		}
@@ -612,13 +612,13 @@ func checkStepScope(ctx context.Context, scope capkit.ScopeChecker, st *Step, va
 		if name == "" {
 			return fmt.Errorf("dns 步骤 %s 缺少 query_name", st.Name)
 		}
-		return scope.Check(ctx, capkit.Target{Kind: capkit.TargetDomain, Host: name})
+		return scope.Check(ctx, core.Target{Kind: core.TargetDomain, Host: name})
 	default:
 		raw := render(st.Request.URL, vars)
 		if !strings.Contains(raw, "://") && baseURL != "" {
 			raw = strings.TrimSuffix(baseURL, "/") + "/" + strings.TrimLeft(raw, "/")
 		}
-		t, err := capkit.TargetFromURL(0, raw)
+		t, err := core.TargetFromURL(0, raw)
 		if err != nil {
 			return err
 		}

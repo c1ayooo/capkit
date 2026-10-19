@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/adapters/httpx"
+	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/gates"
 )
 
@@ -20,7 +20,7 @@ type recordLimiter struct {
 	err  error
 }
 
-func (l *recordLimiter) Acquire(_ context.Context, key string, _ capkit.RateLimitSpec) (func(), error) {
+func (l *recordLimiter) Acquire(_ context.Context, key string, _ core.RateLimitSpec) (func(), error) {
 	l.keys = append(l.keys, key)
 	if l.err != nil {
 		return nil, l.err
@@ -29,13 +29,13 @@ func (l *recordLimiter) Acquire(_ context.Context, key string, _ capkit.RateLimi
 }
 
 // recordAudit keeps every audit event.
-type recordAudit struct{ events []capkit.AuditEvent }
+type recordAudit struct{ events []core.AuditEvent }
 
-func (a *recordAudit) Record(_ context.Context, ev capkit.AuditEvent) {
+func (a *recordAudit) Record(_ context.Context, ev core.AuditEvent) {
 	a.events = append(a.events, ev)
 }
 
-// fixedClock is a deterministic capkit.Clock.
+// fixedClock is a deterministic core.Clock.
 type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }
@@ -47,7 +47,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func ctxWithProject() context.Context {
-	return capkit.WithCallContext(context.Background(), capkit.CallContext{ProjectID: 1, Actor: "test"})
+	return core.WithCallContext(context.Background(), core.CallContext{ProjectID: 1, Actor: "test"})
 }
 
 func TestClientRateLimitAcquire(t *testing.T) {
@@ -57,7 +57,7 @@ func TestClientRateLimitAcquire(t *testing.T) {
 	defer srv.Close()
 	lim := &recordLimiter{}
 	c := httpx.New(gates.StaticScope("127.0.0.1"), lim, nil)
-	if _, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL}); err != nil {
+	if _, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
 	if len(lim.keys) != 1 {
@@ -66,9 +66,9 @@ func TestClientRateLimitAcquire(t *testing.T) {
 }
 
 func TestClientRateLimitError(t *testing.T) {
-	c := httpx.New(gates.StaticScope("127.0.0.1"), &recordLimiter{err: capkit.NewError(capkit.CodeRateLimited, "busy")}, nil)
-	_, err := c.Do(ctxWithProject(), capkit.Request{URL: "http://127.0.0.1:18080/"})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeRateLimited) {
+	c := httpx.New(gates.StaticScope("127.0.0.1"), &recordLimiter{err: core.NewError(core.CodeRateLimited, "busy")}, nil)
+	_, err := c.Do(ctxWithProject(), core.Request{URL: "http://127.0.0.1:18080/"})
+	if err == nil || !strings.Contains(err.Error(), core.CodeRateLimited) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -80,7 +80,7 @@ func TestClientNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	res, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL})
+	res, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestClientBodyTruncation(t *testing.T) {
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
 	c.MaxBodyBytes = 4
-	res, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL})
+	res, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestClientProxyBranch(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	res, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL, Proxy: srv.URL})
+	res, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL, Proxy: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestClientInvalidProxyIsIgnored(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	res, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL, Proxy: ":// not-a-url"})
+	res, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL, Proxy: ":// not-a-url"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,15 +139,15 @@ func TestClientInvalidProxyIsIgnored(t *testing.T) {
 
 func TestClientInvalidURL(t *testing.T) {
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	if _, err := c.Do(ctxWithProject(), capkit.Request{URL: "://bad"}); err == nil {
+	if _, err := c.Do(ctxWithProject(), core.Request{URL: "://bad"}); err == nil {
 		t.Fatal("expected invalid URL error")
 	}
 }
 
 func TestClientNilScopeDenied(t *testing.T) {
 	c := httpx.New(nil, nil, nil)
-	_, err := c.Do(ctxWithProject(), capkit.Request{URL: "http://127.0.0.1:18080/"})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeScopeDenied) {
+	_, err := c.Do(ctxWithProject(), core.Request{URL: "http://127.0.0.1:18080/"})
+	if err == nil || !strings.Contains(err.Error(), core.CodeScopeDenied) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestClientRedirectLoop(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, nil)
-	_, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL})
+	_, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL})
 	if err == nil {
 		t.Fatal("expected too-many-redirects error")
 	}
@@ -172,7 +172,7 @@ func TestClientAuditAndClock(t *testing.T) {
 	audit := &recordAudit{}
 	c := httpx.New(gates.StaticScope("127.0.0.1"), nil, audit)
 	c.Clock = fixedClock{t: time.Now()}
-	if _, err := c.Do(ctxWithProject(), capkit.Request{URL: srv.URL}); err != nil {
+	if _, err := c.Do(ctxWithProject(), core.Request{URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
 	if len(audit.events) != 1 || audit.events[0].Status != "ok" {
@@ -185,7 +185,7 @@ func TestClientTransportError(t *testing.T) {
 	c.Base = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("dial refused")
 	})}
-	_, err := c.Do(ctxWithProject(), capkit.Request{URL: "http://127.0.0.1:18081/"})
+	_, err := c.Do(ctxWithProject(), core.Request{URL: "http://127.0.0.1:18081/"})
 	if err == nil || !strings.Contains(err.Error(), "dial refused") {
 		t.Fatalf("err = %v", err)
 	}
@@ -201,7 +201,7 @@ func TestFetcherOK(t *testing.T) {
 	lim := &recordLimiter{}
 	audit := &recordAudit{}
 	f := httpx.NewFetcher(lim, audit)
-	res, err := f.Fetch(context.Background(), capkit.Request{URL: srv.URL})
+	res, err := f.Fetch(context.Background(), core.Request{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,15 +215,15 @@ func TestFetcherOK(t *testing.T) {
 
 func TestFetcherInvalidURL(t *testing.T) {
 	f := httpx.NewFetcher(nil, nil)
-	if _, err := f.Fetch(context.Background(), capkit.Request{URL: "://bad"}); err == nil {
+	if _, err := f.Fetch(context.Background(), core.Request{URL: "://bad"}); err == nil {
 		t.Fatal("expected invalid URL error")
 	}
 }
 
 func TestFetcherLimiterError(t *testing.T) {
-	f := httpx.NewFetcher(&recordLimiter{err: capkit.NewError(capkit.CodeRateLimited, "slow down")}, nil)
-	_, err := f.Fetch(context.Background(), capkit.Request{URL: "http://127.0.0.1:18082/"})
-	if err == nil || !strings.Contains(err.Error(), capkit.CodeRateLimited) {
+	f := httpx.NewFetcher(&recordLimiter{err: core.NewError(core.CodeRateLimited, "slow down")}, nil)
+	_, err := f.Fetch(context.Background(), core.Request{URL: "http://127.0.0.1:18082/"})
+	if err == nil || !strings.Contains(err.Error(), core.CodeRateLimited) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestFetcherTransportError(t *testing.T) {
 		return nil, errors.New("no route")
 	})}
 	f.Clock = fixedClock{t: time.Now()}
-	_, err := f.Fetch(context.Background(), capkit.Request{URL: "http://127.0.0.1:18083/"})
+	_, err := f.Fetch(context.Background(), core.Request{URL: "http://127.0.0.1:18083/"})
 	if err == nil || !strings.Contains(err.Error(), "no route") {
 		t.Fatalf("err = %v", err)
 	}
@@ -251,7 +251,7 @@ func TestFetcherBodyTruncation(t *testing.T) {
 	defer srv.Close()
 	f := httpx.NewFetcher(nil, nil)
 	f.MaxBodyBytes = 3
-	res, err := f.Fetch(context.Background(), capkit.Request{URL: srv.URL})
+	res, err := f.Fetch(context.Background(), core.Request{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestFetcherProxyBranch(t *testing.T) {
 	}))
 	defer srv.Close()
 	f := httpx.NewFetcher(nil, nil)
-	res, err := f.Fetch(context.Background(), capkit.Request{URL: srv.URL, Proxy: srv.URL})
+	res, err := f.Fetch(context.Background(), core.Request{URL: srv.URL, Proxy: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
