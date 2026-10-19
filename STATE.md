@@ -24,6 +24,13 @@
 `TestAliyunRunCommandOffline`），属并行会话进行中的实现，本会话不触碰。
 除此之外 build / vet / test / contract envelope / import boundaries 全绿，契约覆盖 76 工具。
 
+**M1 退出还差两项（均不在本会话控制内）**：
+
+1. `all/register.go` 缺 `RegisterCloud`，cloudkit 的 5 个工具未注册 → 契约覆盖 76 < 81；
+   `verify.sh` 因 cloudkit 两个在写测试而红。属并行会话 T1–T3。
+2. 四家云 `cloud_ak_verify` / `cloud_asset_list` 需**真实凭据**各跑通一次，
+   本机不存在 `CAPKIT_CLOUD_*` 环境变量 → 无法执行（对应 STOP 条件 1）。
+
 更新时间：2026-10-19
 
 ## 一、项目目标（不可漂移）
