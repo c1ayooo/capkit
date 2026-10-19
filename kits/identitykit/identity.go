@@ -61,6 +61,45 @@ func ExtractCSRFNamed(html, name string) string {
 	return ""
 }
 
+// ExtractCSRFWithSource is ExtractCSRF/ExtractCSRFNamed plus where the token
+// came from ("hidden_input" or "meta"). A caller that fills a login form needs
+// the distinction, because the two are submitted differently: a hidden input
+// goes back as a form field, a meta tag as a request header. Returns an empty
+// name and token when nothing matched.
+func ExtractCSRFWithSource(html, want string) (name, token, source string) {
+	if strings.TrimSpace(want) != "" {
+		re := regexp.MustCompile(`(?is)<input[^>]*name=["']` + regexp.QuoteMeta(want) + `["'][^>]*value=["']([^"']*)["']`)
+		if m := re.FindStringSubmatch(html); len(m) == 2 && m[1] != "" {
+			return want, m[1], "hidden_input"
+		}
+		re2 := regexp.MustCompile(`(?is)<input[^>]*value=["']([^"']*)["'][^>]*name=["']` + regexp.QuoteMeta(want) + `["']`)
+		if m := re2.FindStringSubmatch(html); len(m) == 2 && m[1] != "" {
+			return want, m[1], "hidden_input"
+		}
+		re3 := regexp.MustCompile(`(?is)<meta[^>]*name=["']` + regexp.QuoteMeta(want) + `["'][^>]*content=["']([^"']*)["']`)
+		if m := re3.FindStringSubmatch(html); len(m) == 2 && m[1] != "" {
+			return want, m[1], "meta"
+		}
+		return "", "", ""
+	}
+	for _, m := range csrfInputRE.FindAllStringSubmatch(html, -1) {
+		if len(m) == 3 && m[2] != "" {
+			return m[1], m[2], "hidden_input"
+		}
+	}
+	for _, m := range csrfInputRE2.FindAllStringSubmatch(html, -1) {
+		if len(m) == 3 && m[1] != "" {
+			return m[2], m[1], "hidden_input"
+		}
+	}
+	for _, m := range metaCSRFRE.FindAllStringSubmatch(html, -1) {
+		if len(m) == 3 && m[2] != "" {
+			return m[1], m[2], "meta"
+		}
+	}
+	return "", "", ""
+}
+
 // ---- Cookie-jar identity ----
 
 // JarIdentity is an Identity backed by an http cookie jar plus extra static

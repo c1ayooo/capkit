@@ -13,6 +13,7 @@ import (
 	"github.com/c1ayooo/capkit/all"
 	"github.com/c1ayooo/capkit/harness"
 	"github.com/c1ayooo/capkit/kits/enterprisekit"
+	"github.com/c1ayooo/capkit/kits/identitykit"
 	"github.com/c1ayooo/capkit/runtime"
 )
 
@@ -101,6 +102,13 @@ func contractRuntime(t *testing.T) *runtime.Runtime {
 	}
 	if err := all.RegisterEnterprise(reg, unavailableResolver{}); err != nil {
 		t.Fatalf("RegisterEnterprise: %v", err)
+	}
+	// identitykit takes its flow registry as an argument (like enterprisekit's
+	// resolver), so it is registered here rather than being inside RegisterFull.
+	// An empty registry is the honest minimal wiring: it exercises
+	// identity_login's "kind not registered" path instead of a mock success.
+	if err := all.RegisterIdentity(reg, nil); err != nil {
+		t.Fatalf("RegisterIdentity: %v", err)
 	}
 	ports := harness.NewPorts()
 	rt, err := runtime.New(runtime.Config{
@@ -258,9 +266,12 @@ func envelopeJSON(res capkit.Result) string {
 }
 
 // kitRegistration documents, for every kit in the module, how a host registers
-// it. identitykit and sessionkit are contract-only packages: they carry the
-// Session/Identity types and transports, declare no tools, and are therefore
-// absent from the registry by design (docs §3.1).
+// it. sessionkit is a contract-only package: it carries the Session types and
+// transports, declares no tools, and is therefore absent from the registry by
+// design (docs §3.1). identitykit used to be contract-only too; it now declares
+// the three identity tools (M2) and is registered through RegisterIdentity with
+// an empty flow registry — the same path a host with no registered site logins
+// takes (pinned in argKitRegistration below).
 var kitRegistration = map[string]func(*capkit.Registry) error{
 	"httpkit":        all.RegisterHTTP,
 	"nucleikit":      all.RegisterNuclei,
@@ -282,6 +293,19 @@ var kitRegistration = map[string]func(*capkit.Registry) error{
 	"reconkit":       all.RegisterRecon,
 }
 
+// argKitRegistration covers the kits whose registration helper takes a
+// host-supplied collaborator, so they cannot be values in kitRegistration. They
+// are pinned here with the minimal legal argument: an empty identity flow
+// registry, and a resolver that reports everything unconfigured.
+var argKitRegistration = map[string]func(*capkit.Registry) error{
+	"identitykit": func(reg *capkit.Registry) error {
+		return all.RegisterIdentity(reg, identitykit.NewAuthFlowRegistry())
+	},
+	"enterprisekit": func(reg *capkit.Registry) error {
+		return all.RegisterEnterprise(reg, unavailableResolver{})
+	},
+}
+
 // postExploitationKits are registered by RegisterPostExploitation, which
 // instantiates each kit to read its manifest.
 var postExploitationKits = []string{"privesckit", "internalnetkit", "persistkit", "cleanupkit", "avkit"}
@@ -289,11 +313,18 @@ var postExploitationKits = []string{"privesckit", "internalnetkit", "persistkit"
 // TestEveryKitReachesTheRegistry fails when a kit exists in the module but no
 // registration helper exposes its tools: its manifest is then unreachable from
 // RegisterFull, and its tools silently never reach an agent.
-//
-// enterprisekit is registered with a resolver, so it is checked separately from
-// RegisterFull here.
 func TestEveryKitReachesTheRegistry(t *testing.T) {
 	for name, register := range kitRegistration {
+		reg := capkit.NewRegistry()
+		if err := register(reg); err != nil {
+			t.Errorf("%s: register: %v", name, err)
+			continue
+		}
+		if !hasCapability(reg, name) {
+			t.Errorf("%s: its registration helper did not add the capability", name)
+		}
+	}
+	for name, register := range argKitRegistration {
 		reg := capkit.NewRegistry()
 		if err := register(reg); err != nil {
 			t.Errorf("%s: register: %v", name, err)

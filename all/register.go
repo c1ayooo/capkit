@@ -6,6 +6,8 @@
 package all
 
 import (
+	"errors"
+
 	"github.com/c1ayooo/capkit"
 	"github.com/c1ayooo/capkit/kits/avkit"
 	"github.com/c1ayooo/capkit/kits/cleanupkit"
@@ -18,6 +20,7 @@ import (
 	"github.com/c1ayooo/capkit/kits/githubkit"
 	"github.com/c1ayooo/capkit/kits/httpkit"
 	"github.com/c1ayooo/capkit/kits/icpkit"
+	"github.com/c1ayooo/capkit/kits/identitykit"
 	"github.com/c1ayooo/capkit/kits/internalnetkit"
 	"github.com/c1ayooo/capkit/kits/latkit"
 	"github.com/c1ayooo/capkit/kits/nucleikit"
@@ -26,7 +29,9 @@ import (
 	"github.com/c1ayooo/capkit/kits/playbookkit"
 	"github.com/c1ayooo/capkit/kits/privesckit"
 	"github.com/c1ayooo/capkit/kits/reconkit"
+	"github.com/c1ayooo/capkit/kits/sessionkit"
 	"github.com/c1ayooo/capkit/kits/shellkit"
+	"github.com/c1ayooo/capkit/kits/shellkit/session"
 	"github.com/c1ayooo/capkit/kits/spacemapkit"
 	"github.com/c1ayooo/capkit/kits/templatekit"
 	"github.com/c1ayooo/capkit/kits/toolparse"
@@ -205,6 +210,47 @@ func RegisterEnterprise(reg *capkit.Registry, resolver enterprisekit.ProviderRes
 		Manifest: kit.Manifest(),
 		New:      func(capkit.Deps) (capkit.Capability, error) { return kit, nil },
 	})
+}
+
+// RegisterIdentity registers the three identity tools (identity_login,
+// identity_csrf, identity_token_check). The flow registry is host-supplied, so
+// this helper takes it explicitly rather than reading it from capkit.Deps — the
+// same reason RegisterEnterprise takes a resolver.
+//
+// A host assembles site logins on the registry and hands it here; identity_login
+// then resolves the agent's `kind` against it. An empty registry is legal: the
+// tools still register, and identity_login reports the kind as unregistered
+// instead of pretending to log in. The kit also needs an HTTPDoer
+// (Manifest.Requires "http") for identity_csrf.
+func RegisterIdentity(reg *capkit.Registry, flows *identitykit.AuthFlowRegistry) error {
+	if flows == nil {
+		flows = identitykit.NewAuthFlowRegistry()
+	}
+	return reg.Add(capkit.Spec{
+		Manifest: identitykit.Manifest(),
+		New: func(deps capkit.Deps) (capkit.Capability, error) {
+			return identitykit.NewCapabilityWithFlows(deps, flows)
+		},
+	})
+}
+
+// RegisterWebShellOpener wires shellkit's WebShellOpener into a sessionkit
+// Manager under kind "webshell". It exists so a host assembles a WebShell
+// foothold in one line: after this, session_open(kind="webshell", host=<shell
+// URL>, options={"shell_type":...}, secret=<password>) drives the given
+// Executor through the same Session contract SSH and WinRM use.
+//
+// It lives here rather than in either kit because it needs both: shellkit owns
+// the opener, sessionkit owns the Manager, and a kit may not import another kit.
+func RegisterWebShellOpener(mgr *sessionkit.Manager, exec session.Executor) error {
+	if mgr == nil {
+		return errors.New("sessionkit.Manager 不能为空")
+	}
+	if exec == nil {
+		return errors.New("WebShell Executor 不能为空")
+	}
+	mgr.RegisterOpener("webshell", &shellkit.WebShellOpener{Executor: exec})
+	return nil
 }
 
 // Register registers the minimal, port-free baseline: the HTTP probe and the
