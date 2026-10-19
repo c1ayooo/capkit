@@ -6,6 +6,20 @@
 
 当前里程碑：**M2 会话与身份闭环 — DONE**（Exit 四项实测通过，已推送 origin/main）；M1 因真实凭据缺失保持 DOING
 
+## 冻结（2026-10-19）：M2 为最后一个交付里程碑
+
+- **状态：FROZEN**。M3–M9 不启动，`docs/ROADMAP.md` 保留不删。
+- **冻结依据（事实）**：唯一宿主 4zrec 于同日回退到 `v0.5.0`，其 `go.mod` 不再引用 capkit，
+  全仓 `runtime.Call` 调用点为 0。当前无消费方。
+- **已交付**：8 个 kit 曾被 4zrec 真实 import（shellkit / spacemapkit / credkit /
+  enterprisekit / playbookkit / exploitkit / icpkit / githubkit）。其余 17 个 kit 从未有
+  宿主消费，状态记为 frozen-unverified，不删、不再加功能。
+- **契约层口径**：`runtime.Call` 的四处机制（门禁 / 结果信封 / 证据分离 / 幂等作业）
+  从未被任何宿主接入，属未验证能力，不得对外表述为已验证。
+- **M1 口径**：因缺真实云凭据保持 DOING，随冻结一并永久挂起，不构成未完成项。
+- **解冻条件**：出现第二个真实宿主，或 4zrec 重新接入 `runtime.Call`。解冻时先读本节，
+  再按 `docs/ROADMAP.md` 的顺序约束继续。
+
 ## 阶段 0（2026-10-19 13:2x）：上一会话遗留改动已提交并推送
 
 上一会话遗留的未提交改动（cloudkit 测试补齐 + 门禁缺陷修复 + gofmt）已按语义分 3 个
