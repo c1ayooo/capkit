@@ -15,7 +15,7 @@
 • 面向 agent 的 `Result` 信封：六态 `Status`、有界 `Summary` 与 `Data`、`Findings`、`Next`、`Meta`（由运行时统计的请求预算）、幂等键
 • `Planner` 接口
 • 共享根包辅助函数：`FirstNonEmpty`、`TimeoutFromMS`、`Truncate`、`PreviewRunes`、`EvidenceRefs`、`PageWindow`（kit 只能 import 根包，所以辅助函数统一定义在根）
-• 三个可运行示例：`minimal`、`verify-chain`、`session`
+• 五个可运行示例：`minimal`、`verify-chain`、`session`、`webshell-chain`（cmdi → 落地 → 会话接管全链路）、`identity-login`（登录态自动注入 Cookie）
 • `harness/` 假靶标，含假 nuclei
 
 **信息收集类**
@@ -63,8 +63,9 @@
   - WinRM（WSMan SOAP 走 `HTTPDoer` 端口，所以每次调用都受授权、限速、审计约束）
   - SMB（通过 `ProcessRunner` 调 smbclient，密码走 `PASSWD` 环境变量而非命令行参数）
   - CLI（本地进程，走 `ProcessRunner`，有白名单）
-• `identitykit`：目标侧身份——Cookie 罐、CSRF token 提取、OAuth/JWT 主动刷新
-• `shellkit` 会话工具：`session_open/exec/upload/download`、`tunnel_open`、`session_list`、`session_close`，所有传输方式调用形状一致
+• `identitykit`：目标侧身份——Cookie 罐、CSRF token 提取、OAuth/JWT 主动刷新，并注册三个工具（M2）：`identity_login`（按 kind 调宿主注册的 `AuthFlow`，出参 user/hosts/label）、`identity_csrf`（GET 页面抽 token，返回 name/token/source）、`identity_token_check`（吃 `TokenSnapshot`，返回 `needs_refresh` 与依据）。凭据只从入参读，不落盘、不明文进日志与证据；返回里的头部值脱敏（`Cookie: <N cookies>`、`Authorization: <redacted>`）
+• `shellkit` 会话工具：`session_open/exec/upload/download`、`tunnel_open`、`session_list`、`session_close`，所有传输方式调用形状一致；`webshell_deploy`（M2，high）＝ `payload.Generate` 渲染 + 宿主 `WebShellDeployer` 落盘，出参落点 URL、可直接喂 `session_open` 的 webshell 参数、删除落盘件的清理命令
+• `all.RegisterWebShellOpener(mgr, exec)`：一行把 WebShell 装配进 `sessionkit.Manager` 的 `kind=webshell`
 • `privesckit`：只读的 Linux/Windows 提权枚举与候选排序（只识别与建议，不含 payload）
 • `latkit`：impacket/NetExec/Kerberos 参数构造（psexec/wmiexec/smbexec、pass-the-hash、WinRM、Kerberoast/AS-REP/DCSync），只以子进程方式调用
 • `persistkit`：Linux（cron/systemd/ssh-key/bashrc/ldpreload/pam）与 Windows（计划任务/服务/注册表 Run/WMI 订阅/COM 劫持）落点，分为 `persist_enum` / `persist_plan` / `persist_apply`，apply 需确认
@@ -79,7 +80,7 @@
 • `Fetcher` 端口：外部规则、情报、搜索下载，带限速与审计，不受项目目标域约束
 • 长任务：任何工具输入可设 `"async": true`；运行时仍同步跑完门禁（授权被拒立刻返回，不是靠轮询），然后返回 `StatusPartial` 并在 `Data` 里给 `JobRef`。运行时自带的 `job_status` 工具负责轮询并最终返回该工具自己的信封
 • 列表输出：可能超过 100 行的列表类工具接受 `cursor`，通过 `capkit.PageWindow` 返回 `Page{Total, Cursor, HasMore}`，让 agent 翻页而不是丢行
-• `.github/workflows/capkit-ci.yml`：测试、vet、import 边界检查
+• `.github/workflows/ci.yml`：gofmt、测试、vet、覆盖率（无 kit 0%）、import 边界、五个示例实跑
 
 ## shellkit 子包（同一 module，需显式 import）
 
@@ -106,7 +107,10 @@
 • **`Result.Text`、`EvidenceIDs` 与四个额外错误码**（`not_found`、`conflict`、`unavailable`、`need_human`）是对规格 5.5.1 / 5.5.3 的扩展。`need_human` 是六态 `Status` 必需的；其余保留是因为把它们合并成 `internal` 会误导 agent 去重试本不该重试的调用
 • **四家云未用真实凭据跑过。** `cloudkit` 的四个厂商实现只经过离线假件测试（把 SDK 的 HTTP 客户端换成 `harness` 的 `HTTP`，断言签名头与请求形状），本机没有任何 `CAPKIT_CLOUD_*` 凭据，因此「真实 AK/SK 打真实云 API」这一步**未验证**。这不影响契约：离线测试覆盖工具形状、脱敏、错误分类与分页，但真机上的账号/权限差异（尤其是跨地域 endpoint 与主账号/子账号权限面）仍需一次实测
 • **华为云能力窄于另外三家。** 见上文 `cloudkit` 段：`cloud_storage_list` 与 `cloud_run_command` 返回 `unsupported` 而非伪造实现
-• **`identitykit` 与 `sessionkit` 是契约-only 包。** 两者按设计不声明工具、不进注册表：`identitykit` 提供目标侧身份原语（Cookie 罐、CSRF token、OAuth/JWT 刷新），`sessionkit` 提供 `Session` 契约与四种传输，工具入口在 `shellkit`
+• **`sessionkit` 是契约-only 包。** 按设计不声明工具、不进注册表：它提供 `Session` 契约与四种传输，工具入口在 `shellkit`
+• **`identitykit` 原为契约-only，M2 起改为带工具的包。** ROADMAP M2 任务 1 要求「identitykit 注册成工具」，以其为准，`identitykit/README.md` 原文「契约包，无工具」已同步改写。它仍不在 `RegisterFull` 里——flow registry 是宿主注入的协作者（同 `enterprisekit` 的 resolver），`capkit.Deps` 承载不了，宿主用 `all.RegisterIdentity(reg, flows)` 单独注册
+• **四家云仍未用真实凭据跑过。** 见上文 `cloudkit` 段：本机 `CAPKIT_CLOUD_*` 数量为 0，真实 AK/SK 打真实云 API 这一步**未验证**；离线假件测试不等价于真实调用
+• **WebShell 宿主 Executor 契约在 M2 收紧。** `session.ExecResult` 新增 `Encoding` 字段：文件读取只有宿主声明 `"base64"` 才解码，未声明一律原样（原先的嗅探会把 `abcdefgh` 这类纯文本解成垃圾字节）。未声明 base64 的宿主会从「被猜着解码」变成「原样返回」
 
 ## 注册粒度
 
@@ -114,4 +118,4 @@
 
 会话类 kit 声明 `sessions` 端口，latkit 声明 `process` 端口。宿主注册它们就必须提供 `capkit.SessionManager` / `capkit.ProcessRunner`，否则 `runtime.New` 会直接失败（fail closed），不会静默降级。
 
-`reconkit` 与 `enterprisekit` 不在 `RegisterFull` 里：它们需要 `capkit.Deps` 承载不了的宿主协作者（`AssetSink` / provider 集合、`ProviderResolver`），所以宿主用 `RegisterRecon` / `RegisterEnterprise` 单独注册。
+`reconkit`、`enterprisekit` 与 `identitykit` 不在 `RegisterFull` 里：它们需要 `capkit.Deps` 承载不了的宿主协作者（`AssetSink` / provider 集合、`ProviderResolver`、`AuthFlowRegistry`），所以宿主用 `RegisterRecon` / `RegisterEnterprise` / `RegisterIdentity` 单独注册。`webshell_deploy` 同理需要宿主 `WebShellDeployer`，走 `RegisterSessionWithDeployer`。
