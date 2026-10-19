@@ -6,6 +6,8 @@ Go 语言的通用渗透能力内核库。宿主实现端口（授权、审批�
 
 > 仅限授权测试使用。每次工具调用都经过授权检查，未授权目标无法执行。
 
+**环境要求：Go ≥ 1.25**（`go.mod` 声明 `go 1.25.0`）。低于此版本的 toolchain 无法编译本模块。
+
 ---
 
 ## 一、它能提供什么
@@ -32,7 +34,7 @@ Go 语言的通用渗透能力内核库。宿主实现端口（授权、审批�
 
 ### 1.2 能力全景
 
-24 个能力包，77 个工具。
+25 个能力包，80 个工具，外加运行时自带的 `job_status`，共 81 个可调用工具。
 
 **信息收集**
 
@@ -74,7 +76,7 @@ Go 语言的通用渗透能力内核库。宿主实现端口（授权、审批�
 
 **后渗透**
 
-• `privesc_advise` — Linux/Windows 提权枚举与候选排序
+• `privesc_enum` / `privesc_linux_enum` / `privesc_windows_enum` / `privesc_advise` — Linux/Windows 提权枚举与候选排序
 • `inet_local_info` / `inet_host_discovery` / `inet_portscan` / `inet_domain_info` / `inet_smb_shares` — 跳板机上的内网信息收集
 • `lat_psexec` / `lat_wmiexec` / `lat_smbexec` / `lat_winrm` / `lat_pass_the_hash` / `lat_kerberoast` / `lat_asrep_roast` / `lat_dcsync` — 横向移动与域内攻击
 • `persist_enum` / `persist_plan` / `persist_apply` — 权限维持，apply 需二次确认
@@ -87,8 +89,10 @@ Go 语言的通用渗透能力内核库。宿主实现端口（授权、审批�
 • `cloud_ak_verify` — 云 AK/SK 验证，返回账号与身份类型，AK 脱敏
 • `cloud_asset_list` — ECS/CVM/EC2 与 RDS/CDB 资产列举
 • `cloud_iam_list` — 子用户、策略、AccessKey 元数据（不返回密钥）
-• `cloud_run_command` — 通过云助手在实例上执行命令
+• `cloud_run_command` — 通过云助手在实例上执行命令（`risk: high`，走审批门禁）
 • `cloud_storage_list` — 对象存储桶与对象元数据列举
+
+支持阿里云、腾讯云、AWS、华为云四家，走各家官方 SDK（签名与分页不手搓）。能力覆盖并非四家齐平：华为云不引 OBS 独立 SDK、其 ECS v2 也无云助手 API，所以 `cloud_storage_list` 与 `cloud_run_command` 对华为云明确返回 `unsupported`，而不是伪造实现。只读优先：没有任何删除、改 IAM 策略或创建 AccessKey 的路径。
 
 ### 1.3 一次调用发生什么
 
@@ -137,7 +141,9 @@ Go 语言的通用渗透能力内核库。宿主实现端口（授权、审批�
 • `Clock.Now()`
 • `IDGenerator.New(prefix) string`
 
-会话类 kit 额外声明 `sessions` 端口（`SessionManager`），latkit 声明 `process` 端口。宿主没提供，`runtime.New` 直接失败，不会静默降级。
+会话类 kit 额外声明 `sessions` 端口（`SessionManager`），latkit 声明 `process` 端口，cloudkit 声明 `http` 端口（`HTTPDoer`）。宿主没提供，`runtime.New` 直接失败，不会静默降级。
+
+云工具的每个厂商请求都经由注入的 `HTTPDoer`：云厂商 SDK 的 HTTP 客户端被替换成宿主那个带门禁的客户端，签名、分页、重试仍由 SDK 完成，但出口没有被绕过。凭据只从调用入参读取，不落盘、不进日志，Summary 与错误信息里的 AK 一律脱敏成前 4 位 + 后 4 位。
 
 ---
 
@@ -171,12 +177,13 @@ go run ./examples/minimal
 ### 2.2 注册粒度
 
 ```go
-all.RegisterFull(reg)              // 全部 77 个工具
+all.RegisterFull(reg)              // 全部 80 个工具（含 5 个云工具）
 all.RegisterHTTP(reg)              // 只注册 httpkit
 all.RegisterSession(reg)           // 会话类，需要 SessionManager
 all.RegisterPostExploitation(reg)  // 后渗透
 all.RegisterContainer(reg)         // 容器与 k8s
 all.RegisterLateral(reg)           // 横向移动，需要 ProcessRunner
+all.RegisterCloud(reg)             // 云资产，需要 HTTPDoer
 all.RegisterRecon(reg, sink, providers)   // reconkit 需要宿主注入协作者
 all.RegisterEnterprise(reg, resolver)     // enterprisekit 同理
 ```
@@ -434,7 +441,7 @@ capkit.go / port.go / manifest.go / registry.go   根包契约
 gates/        授权、审批、按主机限速、审计链
 runtime/      从注册表构建能力，调用经过门禁
 adapters/     httpx（带门禁的 HTTP）、exec、sealer
-kits/         24 个能力包
+kits/         25 个能力包
 optional/     重型实现（pd、nuclei-library），核心不 import
 all/          注册入口
 harness/      契约测试用的假靶标
