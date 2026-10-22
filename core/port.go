@@ -170,6 +170,75 @@ type ProcessRunner interface {
 	Run(ctx context.Context, spec ProcessSpec) (*ProcessResult, error)
 }
 
+// ---- vulnerability intel ----
+
+// IntelItem is one advisory published by a public vulnerability-intel source.
+// The kit owns the protocol; the host owns the schema and the dedup policy,
+// so the only key the kit guarantees is UniqueKey (stable per source).
+type IntelItem struct {
+	ID          string   `json:"id,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	UniqueKey   string   `json:"unique_key"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Severity    string   `json:"severity,omitempty"`
+	CVE         string   `json:"cve,omitempty"`
+	Disclosure  string   `json:"disclosure,omitempty"`
+	Solutions   string   `json:"solutions,omitempty"`
+	SourceURL   string   `json:"source_url,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	References  []string `json:"references,omitempty"`
+}
+
+// IntelQuery filters the host's intel store. Empty fields do not filter.
+type IntelQuery struct {
+	Text     string `json:"text,omitempty"`
+	CVE      string `json:"cve,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	Cursor   string `json:"cursor,omitempty"`
+}
+
+// IntelStore is the host-owned persistence for vulnerability intel. Kits
+// never open a database: they hand the host normalized items and the host
+// decides how to store, dedupe and version them.
+//
+// Upsert is idempotent by UniqueKey. It returns the stored record id and
+// whether it was newly created, so a polling kit can report real deltas
+// instead of a raw insert count.
+type IntelStore interface {
+	Upsert(ctx context.Context, item IntelItem) (id string, created bool, err error)
+	Query(ctx context.Context, q IntelQuery) ([]IntelItem, error)
+	Get(ctx context.Context, id string) (*IntelItem, error)
+}
+
+// Completer is the host-provided single-shot text completion port. Kits hold
+// no model credentials and import no provider SDK: the host maps a request to
+// whichever profile is active and applies its own temperature and token
+// budget. A nil Completer means the host has no model configured, and every
+// generation tool reports "unavailable" instead of failing silently.
+type Completer interface {
+	Complete(ctx context.Context, system, user string, maxTokens int) (string, error)
+}
+
+// IntelSource is an advisory source the host contributes to the intel kit's
+// poll loop.
+//
+// It exists because some sources cannot be fetched with a plain HTTP client:
+// they answer every request with an anti-automation page that only a JS
+// runtime can turn into a real URL. Solving that needs a JavaScript engine,
+// which is the wrong dependency for this library — so the host implements the
+// source with whatever it already ships, and the kit polls it alongside its
+// own sources through the same store and dedup path.
+//
+// Implementations must return normalized items with a stable UniqueKey and a
+// non-empty Source. A failure is reported per source, never as a failed poll.
+type IntelSource interface {
+	Name() string
+	Fetch(ctx context.Context, limit int) ([]IntelItem, error)
+}
+
 // ---- artifacts / binaries ----
 
 type ArtifactStore interface {

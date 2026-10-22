@@ -6,6 +6,80 @@
 
 当前里程碑：**M2 会话与身份闭环 — DONE**（Exit 四项实测通过，已推送 origin/main）；M1 因真实凭据缺失保持 DOING
 
+## 解冻（2026-10-20）：4zrec 重新接入 runtime.Call — 新增漏洞情报与产物生成能力
+
+- **解冻依据**：冻结条件写的是「出现第二个真实宿主，或 4zrec 重新接入 `runtime.Call`」。
+  实测 4zrec 已满足：`internal/capkitbridge/bridge.go` 引入 `capkit/runtime` 并调用
+  `rt.Call`（bridge.go:201 `capruntime.New`、:234/:394 `b.rt.Call`），`go.mod` 依赖
+  `capkit v0.4.12`。冻结解除，M3–M9 仍不启动（本次不是里程碑，是能力补齐）。
+- **交付内容（DONE）**：新增 3 个 kit + 2 个端口，`bash scripts/verify.sh` 全绿，
+  契约工具覆盖从 81 涨到 **97**。
+  - 端口：`core.IntelStore`（Upsert/Query/Get，宿主拥有 schema 与去重键）、
+    `core.Completer`（`Complete(ctx, system, user, maxTokens)`，宿主映射模型配置）。
+    两者都加进 `core.Deps`、`Registry.Validate` 的可用表与 `runtime.Config`。
+  - `kits/vulnintelkit`（4 工具）：9 个公开情报源（KEV/OSCS/长亭/奇安信/微步 JSON，
+    AVD/Seebug/启明星辰/Struts2 页面解析）+ 严重度门槛 + 按唯一键幂等入库 + 检索。
+    单源失败隔离，不阻断其余源。
+  - `kits/pockit`（5 工具）：情报 → 结构化分析 + 可运行验证 PoC、nuclei 模板草稿、
+    资产指纹规则草稿、按要素重建脚本；`poc_publish` 才是写库那一步（高风险，走审批门禁）。
+    **模板骨架由代码生成，模型只补请求路径**；缺少可匹配特征时报错而不是产出噪音模板。
+    **PoC 同样是骨架代码生成**（2026-10-20 补齐，见下条）。
+  - `kits/bindingkit`（3 工具）：指纹产品名 → 模板库规范产品键的显式绑定，
+    `binding_check` 回答「已识别 X，能对这台机器跑 Y 模板吗」。
+  - harness 补齐 `Intel`/`Completer` 假件；`sdk-allowlist.txt` 加
+    `kits/pockit gopkg.in/yaml.v3`；DEPENDENCIES.md/README 同步。
+- **PoC 改为要素填充（DONE，2026-10-20）**：原先 `poc_generate` 让模型直接写整段
+  脚本，与 4zrec 侧并发完成的 `pocgen.go` 相比是更弱的做法——模型写出的脚本端点、
+  参数、判定特征常是编的，格式对但跑不通。现在模型只产出 `poc_spec`
+  （path/method/params/body_format/marker/match_status/evidence/constructible），
+  脚本由 `kits/pockit/pocscript.go` 拼装，并强制接地校验：
+  - 入口路径必须非 `/` 且在情报原文里出现（整段或末段 ≥4 字符）；
+  - 响应特征必须能在原文里找到出处，或给出合法状态码 —— 两者都没有就不产出脚本；
+    要素不全时返回 `poc: null` + `poc_note` 说明原因，而不是退化成空壳脚本；
+  - 参数名不接地只降级为 `poc_note` 提示（文档化的端点用显而易见的名字是合理的）；
+  - 脚本只用标准库（`urllib`），不依赖 `requests`，保证在目标侧机器上能跑；
+  - 新增 `poc_script_build`：人工改完要素后不调模型重建，接地规则同样生效。
+  单测包含 `python3 -m py_compile` 实编译校验（环境无 python3 时 skip）。
+  **口径**：实现是按 4zrec 的设计思路重写的，未拷贝其 AGPL 源码。
+- **口径（不许含糊）**：9 个源的**协议实现是重写的**，不是从 4zrec 拷贝——4zrec 是
+  AGPL-3.0，capkit 是 Apache-2.0，拷贝会污染许可。只参考了端点与字段这类协议事实。
+- **live 验证（DONE，2026-10-20）**：加了 `go test -tags live -run TestLiveSources`，
+  用真实 `httpx.Fetcher` 对 9 个源各抓 10 条。**首跑 4/9 可用**，5 个源是坏的，逐个查
+  真因并修掉（每一条都有对应单测，fixture 是真实响应的裁剪副本）：
+  - chaitin：分页循环触发 WAF，第 4 页起回 HTTP 465 的 HTML 挑战页。改成每轮只抓一页
+    （feed 是 newest-first，周期轮询不需要翻页），并对 465/403/429 做一次退避重试。
+  - qianxin：`status=10000` 被当成错误码（其实是 success）；只读 `key_vuln_add`
+    （1 条）而不是 `vuln_add`（实测 76 条），一天的情报丢了 98%。
+  - threatbook / qianxin：严重度只认「高危/中危/低危」，不认情报源用的「高风险/
+    中风险/低风险」，导致全部落成 unknown、过不了严重度门槛。
+  - seebug：解析 `/vuldb/vulnerabilities/`，实际链接是 `/vuldb/ssvid-<id>`；标题取的是
+    第一个 anchor（SSV id）而不是 `class="vul-title"` 那个；等级没从 `data-original-title`
+    读，CVE 和 PoC 标记整行漏掉。
+  - struts2：Confluence 改版，列表页现在只有 `/confluence/spaces/WW/pages/<id>/S2-00N`
+    链接、无标题；改为读列表页 + 逐条抓详情页取 title/CVE/severity。
+  - venustech：详情页不再是「漏洞名称/CVEID/漏洞等级」两列表格，改成分节正文且**没有
+    等级字段**。等级如实报 unknown（不靠措辞猜），详情页抓不到时用列表页的标题+日期
+    降级保留条目——否则 403 限流会让源「看起来没更新」。
+  - **还发现一个此前没测出来的真 bug**：`uniqueKey(source, key)` 参数顺序与所有调用点
+    相反，产出的是 `chaitin_CT-...` 而不是 4zrec 已在用的 `CT-..._chaitin`。直接切换
+    会让每条情报在新键下重新插一行。已修正并加单测钉住。
+  - **aliyun-avd 改为宿主提供（DONE，2026-10-20）**：该站对所有路径（列表/详情/
+    猜的 /api/*）返回同一个约 27KB 的 JS 混淆挑战页，页面数据由脚本算出的签名参数
+    `?timestamp__NNNN=` 现场拼出来，普通 HTTP 客户端拿不到。读它需要 JS 引擎——
+    那是本库不该为一个源背的运行时依赖，也是不该开在库里的远端代码执行面。
+    因此 **capkit 不再内置 AVD**，改为新增端口 `core.IntelSource`
+    （`Name() + Fetch()`）和 `core.Deps.ExtraIntel`：宿主用自己的机制抓源，capkit
+    把它并进同一个 poll 循环、同一个去重键和严重度门槛。
+    4zrec 侧用现有的 goja 方案实现该端口，实测 5 条 AVD 情报端到端入库
+    （`AVD-2026-104935_aliyun-avd`），键格式与存量数据一致。
+  - 复跑结果：capkit 内置 **8/8 可用**（AVD 不再计入内置源）；宿主接入 AVD 后
+    整体 9/9。
+- **待办**：4zrec 侧把源层切到 capkit（bridge 注册 + IntelStore/Completer 适配已 DONE，
+  见下），本地 `grab/analyzer/tplgen/fpgen/pocgen` 的删除**尚未执行**：capkit 的 9 个源
+  未经真实网络验证，且两边 `unique_key` 生成规则不同（4zrec 存源内原始 id，
+  capkit 是 `<id>_<source>`），直接切换会重复入库或缺行。切换方案见 4zrec
+  `docs/capkit-swap-plan.md`。
+
 ## 冻结（2026-10-19）：M2 为最后一个交付里程碑
 
 - **状态：FROZEN**。M3–M9 不启动，`docs/ROADMAP.md` 保留不删。

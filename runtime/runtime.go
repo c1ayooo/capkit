@@ -35,6 +35,15 @@ type Config struct {
 	TemplateEngines map[string]core.TemplateEngine
 	Sessions        core.SessionManager
 
+	// Intel is the host-owned vulnerability-intel store; Completer is the
+	// host-provided model port. Both are optional and only required by the
+	// kits that declare them.
+	Intel     core.IntelStore
+	Completer core.Completer
+	// ExtraIntel are host-implemented advisory sources polled alongside the
+	// intel kit's own. Optional; see core.IntelSource.
+	ExtraIntel []core.IntelSource
+
 	// RequireApprovalAt defaults to high.
 	RequireApprovalAt core.Risk
 	// IdempotencyWindow bounds how long a result keyed by idempotency_key is
@@ -109,6 +118,8 @@ func New(cfg Config, reg *core.Registry) (*Runtime, error) {
 		Artifacts: cfg.Artifacts, Binaries: cfg.Binaries,
 		Fingerprints: cfg.Fingerprints, Templates: cfg.Templates, TemplateEngines: cfg.TemplateEngines,
 		Sessions: cfg.Sessions,
+		Intel:    cfg.Intel, Completer: cfg.Completer,
+		ExtraIntel: cfg.ExtraIntel,
 	}
 	if err := reg.Validate(deps); err != nil {
 		return nil, err

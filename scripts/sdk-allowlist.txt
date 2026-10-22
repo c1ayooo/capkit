@@ -31,6 +31,7 @@ kits/cloudkit github.com/tencentyun/cos-go-sdk-v5
 kits/cloudkit github.com/huaweicloud/huaweicloud-sdk-go-v3
 # --- template / rule parsing ---
 kits/templatekit gopkg.in/yaml.v3
+kits/pockit gopkg.in/yaml.v3
 kits/fingerprintkit gopkg.in/yaml.v3
 kits/playbookkit gopkg.in/yaml.v3
 # --- enterprise data sources + ICP filing ---

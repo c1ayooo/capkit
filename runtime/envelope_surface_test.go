@@ -49,6 +49,30 @@ func (stubFingerprints) Fingerprint(context.Context, core.Target) ([]core.Finger
 	return nil, nil
 }
 
+// stubIntel and stubCompleter let the intel/generation kits reach their own
+// envelope paths instead of failing registry validation.
+type stubIntel struct{}
+
+func (stubIntel) Upsert(context.Context, core.IntelItem) (string, bool, error) {
+	return "intel-1", true, nil
+}
+func (stubIntel) Query(context.Context, core.IntelQuery) ([]core.IntelItem, error) { return nil, nil }
+func (stubIntel) Get(context.Context, string) (*core.IntelItem, error) {
+	return nil, core.NotFound("not found")
+}
+
+type stubCompleter struct{}
+
+func (stubCompleter) Complete(context.Context, string, string, int) (string, error) {
+	return "{}", nil
+}
+
+type stubArtifacts struct{}
+
+func (stubArtifacts) Put(context.Context, string, []byte) (string, error) { return "/tmp/x", nil }
+func (stubArtifacts) Get(context.Context, string) ([]byte, error)         { return nil, core.NotFound("x") }
+func (stubArtifacts) Delete(context.Context, string) error                { return nil }
+
 type stubCatalog struct{}
 
 func (stubCatalog) Search(context.Context, core.TemplateQuery) ([]core.TemplateRef, error) {
@@ -89,7 +113,7 @@ func TestEveryRegisteredToolReturnsAValidEnvelope(t *testing.T) {
 		Settings: settings.New(nil), Sealer: seal, Processes: stubRunner{},
 		Binaries: stubBinaries{}, Fingerprints: stubFingerprints{},
 		Templates: stubCatalog{}, TemplateEngines: map[string]core.TemplateEngine{"http": stubEngine{}},
-		Sessions: mgr,
+		Sessions: mgr, Intel: stubIntel{}, Completer: stubCompleter{}, Artifacts: stubArtifacts{},
 	}, reg)
 	if err != nil {
 		t.Fatal(err)

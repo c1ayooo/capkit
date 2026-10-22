@@ -483,6 +483,91 @@ func (b *Binaries) Status(context.Context, string) (core.BinaryStatus, error) {
 
 // ───────────────────────────── knowledge ports ─────────────────────────────
 
+// Intel is a scripted core.IntelStore. It keeps what it was given, so a test
+// can assert the kit handed the host exactly what it claims.
+type Intel struct {
+	Items []core.IntelItem
+	Err   error
+
+	mu    sync.Mutex
+	byKey map[string]core.IntelItem
+	byID  map[string]core.IntelItem
+	seq   int
+}
+
+func (i *Intel) Upsert(_ context.Context, item core.IntelItem) (string, bool, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.Err != nil {
+		return "", false, i.Err
+	}
+	if i.byKey == nil {
+		i.byKey = map[string]core.IntelItem{}
+		i.byID = map[string]core.IntelItem{}
+	}
+	if existing, ok := i.byKey[item.UniqueKey]; ok {
+		return existing.ID, false, nil
+	}
+	i.seq++
+	id := fmt.Sprintf("intel-%d", i.seq)
+	item.ID = id
+	i.byKey[item.UniqueKey] = item
+	i.byID[id] = item
+	i.Items = append(i.Items, item)
+	return id, true, nil
+}
+
+func (i *Intel) Query(_ context.Context, q core.IntelQuery) ([]core.IntelItem, error) {
+	if i.Err != nil {
+		return nil, i.Err
+	}
+	out := make([]core.IntelItem, 0, len(i.Items))
+	for _, it := range i.Items {
+		if q.Text != "" && !strings.Contains(it.Title, q.Text) {
+			continue
+		}
+		if q.CVE != "" && !strings.EqualFold(it.CVE, q.CVE) {
+			continue
+		}
+		out = append(out, it)
+		if q.Limit > 0 && len(out) >= q.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (i *Intel) Get(_ context.Context, id string) (*core.IntelItem, error) {
+	if i.Err != nil {
+		return nil, i.Err
+	}
+	it, ok := i.byID[id]
+	if !ok {
+		return nil, core.NotFound("intel item not found: " + id)
+	}
+	return &it, nil
+}
+
+// Completer is a scripted core.Completer. Reply is returned verbatim, so a
+// test can feed a canned model answer — or a malformed one.
+type Completer struct {
+	Reply  string
+	Err    error
+	Calls  int
+	System []string
+	User   []string
+}
+
+func (c *Completer) Complete(_ context.Context, system, user string, _ int) (string, error) {
+	c.Calls++
+	c.System = append(c.System, system)
+	c.User = append(c.User, user)
+	if c.Err != nil {
+		return "", c.Err
+	}
+	return c.Reply, nil
+}
+
 // Fingerprints is a scripted core.FingerprintProvider.
 type Fingerprints struct {
 	Result []core.Fingerprint
@@ -740,6 +825,8 @@ type Ports struct {
 	Templates    *Templates
 	Engine       *Engine
 	Sessions     *Sessions
+	Intel        *Intel
+	Completer    *Completer
 }
 
 // NewPorts builds a complete, permissive fake port set: an empty session list,
@@ -755,6 +842,7 @@ func NewPorts() *Ports {
 		Process: &Process{}, Artifact: &Artifacts{}, Binaries: &Binaries{Path: "/fake/bin"},
 		Fingerprints: &Fingerprints{}, Templates: &Templates{}, Engine: &Engine{},
 		Sessions: NewSessions(),
+		Intel:    &Intel{}, Completer: &Completer{},
 	}
 }
 
@@ -769,6 +857,7 @@ func (p *Ports) Deps() core.Deps {
 		Fingerprints: p.Fingerprints, Templates: p.Templates,
 		TemplateEngines: map[string]core.TemplateEngine{"http": p.Engine, "nuclei": &Engine{KindName: "nuclei"}},
 		Sessions:        p.Sessions,
+		Intel:           p.Intel, Completer: p.Completer,
 	}
 }
 

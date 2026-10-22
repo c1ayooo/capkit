@@ -10,6 +10,7 @@ import (
 
 	"github.com/c1ayooo/capkit/core"
 	"github.com/c1ayooo/capkit/kits/avkit"
+	"github.com/c1ayooo/capkit/kits/bindingkit"
 	"github.com/c1ayooo/capkit/kits/cleanupkit"
 	"github.com/c1ayooo/capkit/kits/cloudkit"
 	"github.com/c1ayooo/capkit/kits/containerkit"
@@ -27,6 +28,7 @@ import (
 	"github.com/c1ayooo/capkit/kits/oastkit"
 	"github.com/c1ayooo/capkit/kits/persistkit"
 	"github.com/c1ayooo/capkit/kits/playbookkit"
+	"github.com/c1ayooo/capkit/kits/pockit"
 	"github.com/c1ayooo/capkit/kits/privesckit"
 	"github.com/c1ayooo/capkit/kits/reconkit"
 	"github.com/c1ayooo/capkit/kits/sessionkit"
@@ -36,6 +38,7 @@ import (
 	"github.com/c1ayooo/capkit/kits/templatekit"
 	"github.com/c1ayooo/capkit/kits/toolparse"
 	"github.com/c1ayooo/capkit/kits/verifykit"
+	"github.com/c1ayooo/capkit/kits/vulnintelkit"
 )
 
 // RegisterCred registers the credential-use kit (cloud AK/SK, db, ssh live
@@ -104,6 +107,26 @@ func RegisterFingerprint(reg *core.Registry) error {
 // stays in the template engines (verifykit/nucleikit).
 func RegisterTemplate(reg *core.Registry) error {
 	return reg.Add(core.Spec{Manifest: templatekit.Manifest(), New: templatekit.NewCapability})
+}
+
+// RegisterVulnIntel registers the vulnerability-intel polling kit. The
+// runtime must be given a Fetcher (advisory endpoints are external data) and
+// an IntelStore (the kit never opens a database).
+func RegisterVulnIntel(reg *core.Registry) error {
+	return reg.Add(core.Spec{Manifest: vulnintelkit.Manifest(), New: vulnintelkit.NewCapability})
+}
+
+// RegisterPoC registers the advisory-to-artifact generation kit. The runtime
+// must be given a Completer and an ArtifactStore; generation tools return
+// drafts and only poc_publish writes.
+func RegisterPoC(reg *core.Registry) error {
+	return reg.Add(core.Spec{Manifest: pockit.Manifest(), New: pockit.NewCapability})
+}
+
+// RegisterBinding registers the fingerprint-to-template binding kit. It needs
+// no port: the binding table travels with the call.
+func RegisterBinding(reg *core.Registry) error {
+	return reg.Add(core.Spec{Manifest: bindingkit.Manifest(), New: bindingkit.NewCapability})
 }
 
 // RegisterPlaybook registers deterministic playbook execution.
@@ -312,6 +335,15 @@ func RegisterFull(reg *core.Registry) error {
 		return err
 	}
 	if err := RegisterTemplate(reg); err != nil {
+		return err
+	}
+	if err := RegisterVulnIntel(reg); err != nil {
+		return err
+	}
+	if err := RegisterPoC(reg); err != nil {
+		return err
+	}
+	if err := RegisterBinding(reg); err != nil {
 		return err
 	}
 	if err := RegisterToolParse(reg); err != nil {

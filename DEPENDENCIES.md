@@ -57,7 +57,7 @@ subpackages, but not another kit.
 
 | Dependency | Used by | Why |
 |---|---|---|
-| `gopkg.in/yaml.v3` | `templatekit`, `fingerprintkit` | pack/template and dddd rule parsing |
+| `gopkg.in/yaml.v3` | `templatekit`, `fingerprintkit`, `pockit` | pack/template and dddd rule parsing; nuclei draft emission |
 | `github.com/tidwall/gjson` | `enterprisekit` | AQC/TYC/Kuaicha/Fengniao JSON whose field names drift across upstream versions |
 | `golang.org/x/crypto` | `credkit`, `sessionkit` | SSH handshake + auth methods (live credential verification, session transport) |
 | `github.com/jackc/pgx/v5` | `credkit` | `database/sql` driver for the Postgres liveness/permission probe |

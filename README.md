@@ -38,7 +38,7 @@ Go 语言的渗透能力实现库，附一套宿主契约参考。宿主实现�
 
 ### 1.2 能力全景
 
-25 个能力包，80 个工具，外加运行时自带的 `job_status`，共 81 个可调用工具。
+28 个能力包，96 个工具，外加运行时自带的 `job_status`，共 97 个可调用工具。
 
 **信息收集**
 
@@ -48,11 +48,21 @@ Go 语言的渗透能力实现库，附一套宿主契约参考。宿主实现�
 • `fingerprint_detect` — HTTP 指纹识别，匹配响应头、正文、Cookie、favicon
 • `nuclei_scan` / `nuclei_status` — nuclei 执行与二进制状态
 • `template_search` / `template_get` — 模板目录检索（只读，不执行）
+• `binding_resolve` / `binding_check` / `binding_defaults` — 指纹产品名 → 模板库规范产品键的显式绑定，以及「这个模板该不该对这台机器跑」的门禁判定
 • `tool_parse` / `tool_parse_list` — httpx/ffuf/nmap/sqlmap/katana 等 CLI 输出结构化解析
 • `playbook_run` / `playbook_list` — 确定性剧本执行，断言失败即停
 • `icp_query` / `icp_types` — 工信部 ICP 备案查询
 • `enterprise_search` / `enterprise_detail` / `enterprise_providers` — 企业信息检索（爱企查/天眼查/快查/风鸟）
 • `github_secret_search` / `github_dork_templates` — GitHub 代码搜索找泄露密钥
+
+**漏洞情报与产物生成**
+
+• `vulnintel_sources` / `vulnintel_poll` / `vulnintel_search` / `vulnintel_get` — 8 个公开漏洞情报源的抓取与检索；抓取结果交给宿主的情报库端口落库。宿主还能通过 `core.Deps.ExtraIntel`（`core.IntelSource`）注入自己抓的源，一起走同一个入库/去重/严重度门槛——阿里云 AVD 走这条路：它的反爬页要跑 JS 才能拿到数据，不该为它给本库引入 JS 引擎
+• `poc_generate` / `poc_template_draft` / `poc_fingerprint_draft` — 把一条情报生成结构化分析（含可运行验证 PoC）、nuclei 模板草稿与资产指纹草稿；**只产草稿**
+• `poc_script_build` — 由人工核对/修改后的「验证要素」重建 PoC 脚本，不调模型
+• `poc_publish` — 人工确认后把草稿写进宿主产物库（高风险，走审批门禁）
+
+PoC 走**要素填充 + 代码拼装**，不是让模型写代码：模型只填入口路径、方法、参数与判定特征，脚本由固定骨架生成；入口路径和响应特征必须能在情报原文里找到出处，找不到就不产出脚本（返回 `poc: null` 与 `poc_note` 说明原因）。没有判定依据、只有格式的脚本比没有更糟。生成脚本只用标准库，不依赖 requests 这类第三方包。
 
 **漏洞验证与利用**
 
@@ -135,6 +145,8 @@ Go 语言的渗透能力实现库，附一套宿主契约参考。宿主实现�
 
 • `EvidenceSink.Record(ctx, Evidence) (id string, error)` — 证据归档
 • `ArtifactStore.Put/Get/Delete` — 中间产物
+• `IntelStore.Upsert/Query/Get` — 漏洞情报库（kit 不碰数据库，schema 与去重键归宿主）
+• `Completer.Complete(ctx, system, user, maxTokens)` — 单次文本补全；宿主映射到当前激活的模型配置，kit 不持有任何模型凭据或 SDK
 • `Settings.GetString/GetBool/GetInt` — 配置
 • `Sealer.Seal/Open` — 密钥加密存储
 • `BinaryManager.Ensure/Update/Status` — 外部二进制（nuclei 等）
@@ -181,7 +193,7 @@ go run ./examples/minimal
 ### 2.2 注册粒度
 
 ```go
-all.RegisterFull(reg)              // 全部 80 个工具（含 5 个云工具）
+all.RegisterFull(reg)              // 全部 96 个工具（含 5 个云工具）
 all.RegisterHTTP(reg)              // 只注册 httpkit
 all.RegisterSession(reg)           // 会话类，需要 SessionManager
 all.RegisterPostExploitation(reg)  // 后渗透
@@ -445,7 +457,7 @@ core.go / port.go / manifest.go / registry.go   根包契约
 gates/        授权、审批、按主机限速、审计链
 runtime/      从注册表构建能力，调用经过门禁
 adapters/     httpx（带门禁的 HTTP）、exec、sealer
-kits/         25 个能力包
+kits/         28 个能力包
 optional/     重型实现（pd、nuclei-library），核心不 import
 all/          注册入口
 harness/      契约测试用的假靶标

@@ -28,6 +28,15 @@ type Deps struct {
 	Templates       TemplateCatalog
 	TemplateEngines map[string]TemplateEngine
 	Sessions        SessionManager
+
+	Intel     IntelStore
+	Completer Completer
+
+	// ExtraIntel are advisory sources the host fetches itself and wants polled
+	// through the same store and dedup path as the kit's own sources. See
+	// IntelSource: this is the seam for sources that need host-specific
+	// machinery (a JS engine, an authenticated API, a private feed).
+	ExtraIntel []IntelSource
 }
 
 // Spec is a static capability declaration: manifest + constructor. It holds no
@@ -103,6 +112,8 @@ func (r *Registry) Validate(deps Deps) error {
 		"templates":        deps.Templates != nil,
 		"template_engines": len(deps.TemplateEngines) > 0,
 		"sessions":         deps.Sessions != nil,
+		"intel":            deps.Intel != nil,
+		"completer":        deps.Completer != nil,
 	}
 	var missing []string
 	for _, spec := range r.specs {

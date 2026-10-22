@@ -120,6 +120,8 @@ func contractRuntime(t *testing.T) *runtime.Runtime {
 		Fingerprints: ports.Fingerprints, Templates: ports.Templates,
 		TemplateEngines: ports.Deps().TemplateEngines,
 		Sessions:        ports.Sessions,
+		Intel:           ports.Intel,
+		Completer:       ports.Completer,
 	}, reg)
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
@@ -291,6 +293,9 @@ var kitRegistration = map[string]func(*core.Registry) error{
 	"containerkit":   all.RegisterContainer,
 	"latkit":         all.RegisterLateral,
 	"reconkit":       all.RegisterRecon,
+	"vulnintelkit":   all.RegisterVulnIntel,
+	"pockit":         all.RegisterPoC,
+	"bindingkit":     all.RegisterBinding,
 }
 
 // argKitRegistration covers the kits whose registration helper takes a
